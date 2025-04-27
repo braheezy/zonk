@@ -1,4 +1,5 @@
 const std = @import("std");
+const image = @import("image");
 const Game = @This();
 
 vtable: *const VTable,
@@ -6,7 +7,7 @@ instance: *anyopaque,
 
 const VTable = struct {
     updateFn: *const fn (*anyopaque) void,
-    drawFn: *const fn (*anyopaque) void,
+    drawFn: *const fn (*anyopaque, *image.Image) void,
     layoutFn: *const fn (*anyopaque, usize, usize) void,
 };
 
@@ -18,8 +19,8 @@ pub fn update(self: *Game) void {
     self.vtable.updateFn(self.instance);
 }
 
-pub fn draw(self: *Game) void {
-    self.vtable.drawFn(self.instance);
+pub fn draw(self: *Game, screen: *image.Image) void {
+    self.vtable.drawFn(self.instance, screen);
 }
 
 pub fn layout(self: *Game, width: usize, height: usize) void {
@@ -36,9 +37,9 @@ pub fn init(comptime T: type, instance: *T) Game {
             }
         }.func,
         .drawFn = struct {
-            fn func(ptr: *anyopaque) void {
+            fn func(ptr: *anyopaque, screen: *image.Image) void {
                 const self = Game.castTo(T, ptr);
-                return self.draw();
+                return self.draw(screen);
             }
         }.func,
         .layoutFn = struct {

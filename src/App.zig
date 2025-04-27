@@ -9,7 +9,7 @@ pub const Game = @import("Game.zig");
 
 // Vertex format for 2D/2.5D rendering
 pub const Vertex2D = struct {
-    position: [3]f32,
+    position: [2]f32,
     color: [4]f32,
     uv: [2]f32,
 };
@@ -46,6 +46,7 @@ width: u32,
 height: u32,
 
 pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
+    std.debug.print("App.init - initializing GLFW\n", .{});
     try zglfw.init();
 
     // Create window
@@ -59,6 +60,7 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
         title_sentinel,
         null,
     );
+    std.debug.print("App.init - window created\n", .{});
 
     // Create app instance
     const app = try allocator.create(App);
@@ -72,6 +74,7 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
         .height = config.height,
     };
 
+    std.debug.print("App.init - creating graphics context\n", .{});
     // Initialize graphics context
     const gfx = try zgpu.GraphicsContext.create(allocator, .{
         .window = window,
@@ -98,8 +101,7 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
             },
         },
     });
-
-    std.debug.print("init graphics\n", .{});
+    std.debug.print("App.init - graphics context created\n", .{});
 
     // Initialize graphics system
     app.graphics = try Graphics.init(
@@ -109,9 +111,8 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
         config.height,
     );
 
-    std.debug.print("init graphics done\n", .{});
-
     app.createCallbacks();
+    std.debug.print("App.init - initialization complete\n", .{});
 
     return app;
 }
@@ -208,7 +209,6 @@ pub fn deinit(self: *App) void {
 }
 
 pub fn isRunning(self: *App) bool {
-    std.debug.print("isRunning\n", .{});
     return !self.window.shouldClose() and
         self.window.getKey(.escape) != .press;
 }
@@ -220,13 +220,16 @@ pub fn run(
 ) !void {
     self.game = Game.init(T, instance);
 
-    std.debug.print("run game\n", .{});
+    std.debug.print("App.run - starting game loop\n", .{});
     const fps = 60;
     const frame_ns = std.time.ns_per_s / fps;
     var last = std.time.timestamp();
     var acc: u64 = 0;
 
     while (self.isRunning()) {
+        std.debug.print("Game loop iteration\n", .{});
+        zglfw.pollEvents();
+
         const now = std.time.timestamp();
         acc += @as(u64, @intCast(now - last));
         last = now;
@@ -237,6 +240,7 @@ pub fn run(
 
         // Dispatch fixed-dt updates
         while (acc >= frame_ns) : (acc -= frame_ns) {
+            std.debug.print("Fixed update tick\n", .{});
             if (self.game) |*game| {
                 game.update();
             }
@@ -244,9 +248,14 @@ pub fn run(
 
         // Layout and draw
         if (self.game) |*game| {
+            std.debug.print("Game layout start\n", .{});
             game.layout(self.width, self.height);
-            std.debug.print("draw game\n", .{});
-            game.draw();
+            std.debug.print("Game draw start\n", .{});
+            game.draw(self.graphics.getScreen());
+            std.debug.print("Graphics present start\n", .{});
+            self.graphics.present();
+            std.debug.print("Frame complete\n", .{});
         }
+        self.window.swapBuffers();
     }
 }

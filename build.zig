@@ -25,14 +25,15 @@ pub fn build(b: *std.Build) void {
     const zpix = b.dependency("zpix", .{});
     zonk_mod.addImport("jpeg", zpix.module("jpeg"));
     zonk_mod.addImport("png", zpix.module("png"));
-    zonk_mod.addImport("image", zpix.module("image"));
+    const image_mod = zpix.module("image");
+    zonk_mod.addImport("image", image_mod);
 
     if (target.result.os.tag != .emscripten) {
         zonk_mod.linkLibrary(zglfw.artifact("glfw"));
         zonk_mod.linkLibrary(zgpu.artifact("zdawn"));
     }
 
-    buildPong(b, target, optimize, zonk_mod);
+    buildPong(b, target, optimize, zonk_mod, zpix);
 }
 
 fn buildPong(
@@ -40,7 +41,11 @@ fn buildPong(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     zonk_mod: *std.Build.Module,
+    zpix: *std.Build.Dependency,
 ) void {
+    const image_mod = zpix.module("image");
+    const color_mod = zpix.module("color");
+
     const pong_mod = b.createModule(.{
         .root_source_file = b.path("examples/pong/main.zig"),
         .target = target,
@@ -56,5 +61,7 @@ fn buildPong(
     run_pong_step.dependOn(&run_pong.step);
 
     @import("zgpu").addLibraryPathsTo(pong_exe);
-    pong_exe.root_module.addImport("zonk", zonk_mod);
+    pong_mod.addImport("zonk", zonk_mod);
+    pong_mod.addImport("image", image_mod);
+    pong_mod.addImport("color", color_mod);
 }

@@ -10,19 +10,14 @@ struct VertexOutput {
     @location(1) uv: vec2<f32>,
 };
 
-struct DrawOptions {
-    color: vec4<f32>,
-};
-
-@group(0) @binding(0) var<uniform> options: DrawOptions;
-@group(0) @binding(1) var screen_texture: texture_2d<f32>;
-@group(0) @binding(2) var screen_sampler: sampler;
+@group(0) @binding(0) var screen_texture: texture_2d<f32>;
+@group(0) @binding(1) var screen_sampler: sampler;
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
     output.position = vec4<f32>(input.position, 0.0, 1.0);
-    output.color = input.color * options.color;
+    output.color = input.color;
     output.uv = input.uv;
     return output;
 }
@@ -30,5 +25,5 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let texture_color = textureSample(screen_texture, screen_sampler, input.uv);
-    return input.color * texture_color;
+    return texture_color * input.color;
 }

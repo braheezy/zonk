@@ -33,12 +33,14 @@ pub fn init(
     width: u32,
     height: u32,
 ) !*Graphics {
+    std.debug.print("Graphics.init - creating graphics instance\n", .{});
     const graphics = try allocator.create(Graphics);
     graphics.* = .{
         .allocator = allocator,
         .gfx = gfx,
     };
 
+    std.debug.print("Graphics.init - creating screen image {}x{}\n", .{ width, height });
     // Create an RGBA image for the screen
     graphics.screen = image.Image{ .RGBA = try image.RGBAImage.init(
         allocator,
@@ -53,6 +55,7 @@ pub fn init(
             },
         },
     ) };
+    std.debug.print("Graphics.init - screen image created\n", .{});
 
     // Create the screen texture
     graphics.screen_texture = gfx.createTexture(.{
@@ -65,6 +68,7 @@ pub fn init(
         .format = .rgba8_unorm,
         .mip_level_count = 1,
     });
+    std.debug.print("Graphics.init - screen texture created\n", .{});
 
     // Create texture view
     graphics.screen_texture_view = gfx.createTextureView(graphics.screen_texture, .{
@@ -89,15 +93,8 @@ pub fn init(
 
     // Create bind group layout
     const bind_group_layout = gfx.createBindGroupLayout(&.{
-        zgpu.bufferEntry(
-            0,
-            .{ .vertex = true, .fragment = true },
-            .uniform,
-            true,
-            0,
-        ),
         .{
-            .binding = 1,
+            .binding = 0,
             .visibility = .{ .fragment = true },
             .texture = .{
                 .sample_type = .float,
@@ -105,7 +102,7 @@ pub fn init(
             },
         },
         .{
-            .binding = 2,
+            .binding = 1,
             .visibility = .{ .fragment = true },
             .sampler = .{
                 .binding_type = .filtering,
@@ -139,16 +136,10 @@ pub fn init(
     graphics.screen_bind_group = gfx.createBindGroup(bind_group_layout, &.{
         .{
             .binding = 0,
-            .buffer_handle = graphics.gfx.uniforms.buffer,
-            .offset = 0,
-            .size = @sizeOf(DrawOptions),
-        },
-        .{
-            .binding = 1,
             .texture_view_handle = graphics.screen_texture_view,
         },
         .{
-            .binding = 2,
+            .binding = 1,
             .sampler_handle = sampler,
         },
     });
@@ -170,8 +161,8 @@ pub fn init(
                 .operation = .add,
             },
             .alpha = .{
-                .src_factor = .zero,
-                .dst_factor = .one,
+                .src_factor = .src_alpha,
+                .dst_factor = .one_minus_src_alpha,
                 .operation = .add,
             },
         },
@@ -241,52 +232,89 @@ pub fn deinit(self: *Graphics) void {
     self.allocator.destroy(self);
 }
 
-pub fn updateScreen(self: *Graphics) void {
-    // Get RGBA pixels from the screen image
-    const pixels = self.screen.rgbaPixels(self.allocator) catch return;
-    defer self.allocator.free(pixels);
-
-    const rect = self.screen.bounds();
-    const width = @as(u32, @intCast(rect.dX()));
-    const height = @as(u32, @intCast(rect.dY()));
-
-    // Update the texture with the new pixel data
-    self.gfx.queue.writeTexture(
-        .{ .texture = self.screen_texture },
-        .{
-            .bytes_per_row = width * 4,
-            .rows_per_image = height,
-        },
-        .{ .width = width, .height = height },
-        pixels,
-    );
+pub fn getScreen(self: *Graphics) *image.Image {
+    return &self.screen;
 }
 
-pub fn drawRect(self: *Graphics, x: f32, y: f32, width: f32, height: f32, opts: DrawOptions) void {
+pub fn present(self: *Graphics) void {
+    // Get the current texture view from the swapchain
+    const view = self.gfx.swapchain.getCurrentTextureView();
+    defer view.release();
+
+    // Create command encoder
+    const encoder = self.gfx.device.createCommandEncoder(null);
+    defer encoder.release();
+
+    // Upload screen pixels to GPU texture
+    const bounds = self.screen.bounds();
+    const width = @as(u32, @intCast(bounds.dX()));
+    const height = @as(u32, @intCast(bounds.dY()));
+
+    // Get RGBA pixels from the screen image
+    const pixels = self.screen.RGBA.pixels;
+
+    // Calculate aligned bytes per row (256-byte alignment)
+    const unpadded_bytes_per_row = width * 4;
+    const alignment: u16 = 256;
+    const padded_bytes_per_row = (unpadded_bytes_per_row + alignment - 1) & ~(alignment - 1);
+
+    // Create a padded buffer
+    const padded_size = padded_bytes_per_row * height;
+    const padded_buffer = self.allocator.alloc(u8, padded_size) catch unreachable;
+    defer self.allocator.free(padded_buffer);
+
+    // Copy pixels into padded buffer
+    var y: usize = 0;
+    while (y < height) : (y += 1) {
+        const src_start = y * unpadded_bytes_per_row;
+        const dst_start = y * padded_bytes_per_row;
+        @memcpy(padded_buffer[dst_start..][0..unpadded_bytes_per_row], pixels[src_start..][0..unpadded_bytes_per_row]);
+    }
+
+    // Write pixels to texture
+    self.gfx.queue.writeTexture(
+        .{
+            .texture = self.gfx.lookupResource(self.screen_texture).?,
+        },
+        .{
+            .offset = 0,
+            .bytes_per_row = padded_bytes_per_row,
+            .rows_per_image = height,
+        },
+        .{
+            .width = width,
+            .height = height,
+            .depth_or_array_layers = 1,
+        },
+        u8,
+        padded_buffer,
+    );
+
+    // Set up vertices for a fullscreen quad
     const vertices = [_]Vertex2D{
         // Top-left
         .{
-            .position = .{ x, y + height },
-            .color = opts.color,
-            .uv = .{ 0, 1 },
+            .position = .{ -1.0, 1.0 },
+            .color = .{ 1.0, 1.0, 1.0, 1.0 },
+            .uv = .{ 0.0, 1.0 },
         },
         // Bottom-left
         .{
-            .position = .{ x, y },
-            .color = opts.color,
-            .uv = .{ 0, 0 },
+            .position = .{ -1.0, -1.0 },
+            .color = .{ 1.0, 1.0, 1.0, 1.0 },
+            .uv = .{ 0.0, 0.0 },
         },
         // Bottom-right
         .{
-            .position = .{ x + width, y },
-            .color = opts.color,
-            .uv = .{ 1, 0 },
+            .position = .{ 1.0, -1.0 },
+            .color = .{ 1.0, 1.0, 1.0, 1.0 },
+            .uv = .{ 1.0, 0.0 },
         },
         // Top-right
         .{
-            .position = .{ x + width, y + height },
-            .color = opts.color,
-            .uv = .{ 1, 1 },
+            .position = .{ 1.0, 1.0 },
+            .color = .{ 1.0, 1.0, 1.0, 1.0 },
+            .uv = .{ 1.0, 1.0 },
         },
     };
 
@@ -295,6 +323,83 @@ pub fn drawRect(self: *Graphics, x: f32, y: f32, width: f32, height: f32, opts: 
     // Upload vertex and index data
     self.gfx.queue.writeBuffer(self.vertex_buffer, 0, Vertex2D, &vertices);
     self.gfx.queue.writeBuffer(self.index_buffer, 0, u16, &indices);
+
+    // Begin render pass
+    const color_attachment = [_]zgpu.wgpu.RenderPassColorAttachment{.{
+        .view = view,
+        .load_op = .clear,
+        .store_op = .store,
+        .clear_value = .{ .r = 0.0, .g = 0.0, .b = 0.0, .a = 1.0 },
+    }};
+
+    const render_pass_info = zgpu.wgpu.RenderPassDescriptor{
+        .color_attachments = &color_attachment,
+        .color_attachment_count = 1,
+    };
+
+    const pass = encoder.beginRenderPass(render_pass_info);
+
+    // Set pipeline and bind group
+    pass.setPipeline(self.gfx.lookupResource(self.pipeline).?);
+    pass.setBindGroup(0, self.gfx.lookupResource(self.screen_bind_group).?, &.{});
+
+    // Set vertex and index buffers
+    pass.setVertexBuffer(0, self.vertex_buffer, 0, vertices.len * @sizeOf(Vertex2D));
+    pass.setIndexBuffer(self.index_buffer, .uint16, 0, indices.len * @sizeOf(u16));
+
+    // Draw
+    pass.drawIndexed(indices.len, 1, 0, 0, 0);
+
+    pass.end();
+    pass.release();
+
+    // Submit command buffer
+    const command_buffer = encoder.finish(null);
+    defer command_buffer.release();
+
+    self.gfx.submit(&.{command_buffer});
+    _ = self.gfx.present();
+}
+
+pub fn drawRect(self: *Graphics, x: f32, y: f32, width: f32, height: f32, opts: DrawOptions) void {
+    // const vertices = [_]Vertex2D{
+    //     // Top-left
+    //     .{
+    //         .position = .{ x, y + height },
+    //         .color = opts.color,
+    //         .uv = .{ 0, 1 },
+    //     },
+    //     // Bottom-left
+    //     .{
+    //         .position = .{ x, y },
+    //         .color = opts.color,
+    //         .uv = .{ 0, 0 },
+    //     },
+    //     // Bottom-right
+    //     .{
+    //         .position = .{ x + width, y },
+    //         .color = opts.color,
+    //         .uv = .{ 1, 0 },
+    //     },
+    //     // Top-right
+    //     .{
+    //         .position = .{ x + width, y + height },
+    //         .color = opts.color,
+    //         .uv = .{ 1, 1 },
+    //     },
+    // };
+
+    _ = opts;
+    _ = x;
+    _ = y;
+    _ = width;
+    _ = height;
+
+    // const indices = [_]u16{ 0, 1, 2, 0, 2, 3 };
+
+    // Upload vertex and index data
+    // self.gfx.queue.writeBuffer(self.vertex_buffer, 0, Vertex2D, &vertices);
+    // self.gfx.queue.writeBuffer(self.index_buffer, 0, u16, &indices);
 
     // Get current texture view
     const view = self.gfx.swapchain.getCurrentTextureView();
@@ -309,31 +414,15 @@ pub fn drawRect(self: *Graphics, x: f32, y: f32, width: f32, height: f32, opts: 
         .view = view,
         .load_op = .clear,
         .store_op = .store,
-        .clear_value = .{ .r = 0.1, .g = 0.1, .b = 0.1, .a = 1.0 },
+        .clear_value = .{ .r = 0.0, .g = 0.0, .b = 0.0, .a = 0.0 },
     }};
 
     const render_pass_info = zgpu.wgpu.RenderPassDescriptor{
         .color_attachments = &color_attachment,
         .color_attachment_count = 1,
-        .depth_stencil_attachment = null,
     };
 
     const pass = encoder.beginRenderPass(render_pass_info);
-
-    // Set pipeline and bind group
-    pass.setPipeline(self.gfx.lookupResource(self.pipeline) orelse unreachable);
-    pass.setBindGroup(
-        0,
-        self.gfx.lookupResource(self.screen_bind_group) orelse unreachable,
-        &.{0},
-    );
-
-    // Set vertex and index buffers
-    pass.setVertexBuffer(0, self.vertex_buffer, 0, vertices.len * @sizeOf(Vertex2D));
-    pass.setIndexBuffer(self.index_buffer, .uint16, 0, indices.len * @sizeOf(u16));
-
-    // Draw
-    pass.drawIndexed(indices.len, 1, 0, 0, 0);
 
     zgpu.endReleasePass(pass);
 
@@ -342,6 +431,7 @@ pub fn drawRect(self: *Graphics, x: f32, y: f32, width: f32, height: f32, opts: 
     defer command_buffer.release();
 
     self.gfx.submit(&.{command_buffer});
+    self.gfx.present();
 }
 
 pub fn fillRect(self: *Graphics, x: f32, y: f32, width: f32, height: f32, color: [4]f32) void {
