@@ -225,18 +225,17 @@ pub fn run(
 
     const fps = 60;
     const frame_ns = std.time.ns_per_s / fps;
-    var last = std.time.timestamp();
+    var timer = try std.time.Timer.start();
     var acc: u64 = 0;
 
     while (app.isRunning()) {
         zglfw.pollEvents();
 
-        const now = std.time.timestamp();
-        acc += @as(u64, @intCast(now - last));
-        last = now;
+        const elapsed = timer.lap();
+        acc += elapsed;
 
         // Update timing
-        app.total_time += @as(f32, @floatFromInt(now - last));
+        app.total_time += @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(std.time.ns_per_s));
         app.delta_time = @as(f32, @floatFromInt(frame_ns)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
         // Dispatch fixed-dt updates
@@ -253,5 +252,11 @@ pub fn run(
             app.graphics.render();
         }
         app.window.swapBuffers();
+
+        // Sleep if we're running too fast
+        const frame_time = timer.read();
+        if (frame_time < frame_ns) {
+            std.time.sleep(frame_ns - frame_time);
+        }
     }
 }
