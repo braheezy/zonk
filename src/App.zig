@@ -198,7 +198,6 @@ fn createCallbacks(self: *App) void {
 }
 
 pub fn deinit(self: *App) void {
-    std.debug.print("app deinit\n", .{});
     // Cleanup graphics resources
     self.graphics.deinit();
 
@@ -214,20 +213,22 @@ pub fn isRunning(self: *App) bool {
 }
 
 pub fn run(
-    self: *App,
     comptime T: type,
     instance: *T,
+    allocator: std.mem.Allocator,
+    config: GameConfig,
 ) !void {
-    self.game = Game.init(T, instance);
+    const app = try App.init(allocator, config);
+    defer app.deinit();
 
-    std.debug.print("App.run - starting game loop\n", .{});
+    app.game = Game.init(T, instance);
+
     const fps = 60;
     const frame_ns = std.time.ns_per_s / fps;
     var last = std.time.timestamp();
     var acc: u64 = 0;
 
-    while (self.isRunning()) {
-        std.debug.print("Game loop iteration\n", .{});
+    while (app.isRunning()) {
         zglfw.pollEvents();
 
         const now = std.time.timestamp();
@@ -235,27 +236,22 @@ pub fn run(
         last = now;
 
         // Update timing
-        self.total_time += @as(f32, @floatFromInt(now - last));
-        self.delta_time = @as(f32, @floatFromInt(frame_ns)) / @as(f32, @floatFromInt(std.time.ns_per_s));
+        app.total_time += @as(f32, @floatFromInt(now - last));
+        app.delta_time = @as(f32, @floatFromInt(frame_ns)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
         // Dispatch fixed-dt updates
         while (acc >= frame_ns) : (acc -= frame_ns) {
-            std.debug.print("Fixed update tick\n", .{});
-            if (self.game) |*game| {
+            if (app.game) |*game| {
                 game.update();
             }
         }
 
         // Layout and draw
-        if (self.game) |*game| {
-            std.debug.print("Game layout start\n", .{});
-            game.layout(self.width, self.height);
-            std.debug.print("Game draw start\n", .{});
-            game.draw(self.graphics.getScreen());
-            std.debug.print("Graphics present start\n", .{});
-            self.graphics.present();
-            std.debug.print("Frame complete\n", .{});
+        if (app.game) |*game| {
+            game.layout(app.width, app.height);
+            game.draw(app.graphics.getScreen());
+            app.graphics.render();
         }
-        self.window.swapBuffers();
+        app.window.swapBuffers();
     }
 }

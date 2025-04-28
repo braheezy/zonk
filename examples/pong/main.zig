@@ -7,11 +7,10 @@ const Paddle = @import("Paddle.zig");
 
 const PongGame = struct {
     allocator: std.mem.Allocator,
-    gfx: *zonk.Graphics,
     left_paddle: *Paddle,
     right_paddle: *Paddle,
 
-    pub fn init(allocator: std.mem.Allocator, gfx: *zonk.Graphics) !*PongGame {
+    pub fn init(allocator: std.mem.Allocator) !*PongGame {
         const game = try allocator.create(PongGame);
 
         // Create paddles with initial positions
@@ -29,7 +28,6 @@ const PongGame = struct {
             .allocator = allocator,
             .left_paddle = left_paddle,
             .right_paddle = right_paddle,
-            .gfx = gfx,
         };
 
         return game;
@@ -47,7 +45,7 @@ const PongGame = struct {
         self.right_paddle.update();
     }
 
-    pub fn draw(self: *PongGame, screen: *image.Image) void {
+    pub fn draw(self: *PongGame, screen: *image.RGBAImage) void {
         // Clear screen to black
         screen.clear(.{ .rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 } });
 
@@ -70,20 +68,21 @@ pub fn main() !void {
         std.process.exit(1);
     };
 
-    std.debug.print("init app\n", .{});
-    var app = try zonk.App.init(allocator, .{
+    // Create game instance
+    var game = try PongGame.init(allocator);
+    defer game.deinit();
+    const config = zonk.GameConfig{
         .title = "Pong",
         .width = 800,
         .height = 600,
         .vsync = true,
-    });
-    defer app.deinit();
-
-    std.debug.print("init game\n", .{});
-    // Create game instance
-    var game = try PongGame.init(allocator, app.graphics);
-    defer game.deinit();
+    };
 
     // Configure and run game
-    try app.run(PongGame, game);
+    try zonk.run(
+        PongGame,
+        game,
+        allocator,
+        config,
+    );
 }

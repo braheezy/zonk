@@ -1,7 +1,11 @@
 const std = @import("std");
 const zonk = @import("zonk");
-const image = @import("image");
+const image = @import("zpix").image;
 const color = @import("color");
+const Rectangle = image.Rectangle;
+const Drawer = image.Drawer;
+const RGBAImage = image.RGBAImage;
+
 const Paddle = @This();
 
 // Game state
@@ -29,7 +33,7 @@ pub fn update(self: *Paddle) void {
     // TODO: Add input handling
 }
 
-pub fn draw(self: *Paddle, screen: *image.Image) void {
+pub fn draw(self: *Paddle, screen: *RGBAImage) void {
     const bounds = screen.bounds();
     const screen_width = @as(u32, @intCast(bounds.dX()));
     const screen_height = @as(u32, @intCast(bounds.dY()));
@@ -40,18 +44,16 @@ pub fn draw(self: *Paddle, screen: *image.Image) void {
     const width = @as(i32, @intFromFloat(self.size.width));
     const height = @as(i32, @intFromFloat(self.size.height));
 
-    // Draw paddle as a white rectangle
-    var py: i32 = y;
-    while (py < y + height) : (py += 1) {
-        var px: i32 = x;
-        while (px < x + width) : (px += 1) {
-            if (px >= 0 and px < bounds.max.x and py >= 0 and py < bounds.max.y) {
-                // Create a white color using the image library's Color type
-                const white = color.Color{ .rgba = .{ .r = 255, .g = 255, .b = 255, .a = 255 } };
-                screen.RGBA.setRGBA(px, py, white);
-            }
-        }
-    }
+    // Create a rectangle for the paddle
+    const paddle_rect = Rectangle{
+        .min = .{ .x = x, .y = y },
+        .max = .{ .x = x + width, .y = y + height },
+    };
+
+    // Create a drawer and draw the paddle as a white rectangle
+    var d = Drawer.init(screen);
+    const white = color.Color{ .rgba = .{ .r = 255, .g = 255, .b = 255, .a = 255 } };
+    d.fillRect(paddle_rect, white);
 }
 
 pub fn layout(self: *Paddle, width: usize, height: usize) void {

@@ -45,6 +45,7 @@ fn buildPong(
 ) void {
     const image_mod = zpix.module("image");
     const color_mod = zpix.module("color");
+    const zpix_mod = zpix.module("zpix");
 
     const pong_mod = b.createModule(.{
         .root_source_file = b.path("examples/pong/main.zig"),
@@ -64,4 +65,5 @@ fn buildPong(
     pong_mod.addImport("zonk", zonk_mod);
     pong_mod.addImport("image", image_mod);
     pong_mod.addImport("color", color_mod);
+    pong_mod.addImport("zpix", zpix_mod);
 }
