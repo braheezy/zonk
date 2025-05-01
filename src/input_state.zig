@@ -27,8 +27,9 @@ pub fn update(self: *InputState) void {
 }
 
 pub fn isKeyPressed(self: *InputState, key: zglfw.Key) bool {
-    return (self.current_keys.get(key) orelse false) and
-        !(self.previous_keys.get(key) orelse false);
+    const current = self.current_keys.get(key) orelse false;
+    const previous = self.previous_keys.get(key) orelse false;
+    return current and !previous;
 }
 
 pub fn isKeyDown(self: *InputState, key: zglfw.Key) bool {
