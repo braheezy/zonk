@@ -6,17 +6,24 @@ const Rectangle = image.Rectangle;
 const Drawer = image.Drawer;
 const RGBAImage = image.RGBAImage;
 
+const Controller = enum {
+    ai,
+    human,
+};
+
 const Paddle = @This();
 
 // Game state
 position: [2]f32,
 player_number: u8,
 speed: f32 = 6.0,
+controller: Controller,
 size: struct { width: f32, height: f32 } = .{ .width = 20.0, .height = 100.0 },
 
 pub const Config = struct {
     position: [2]f32,
     player_number: u8,
+    controller: Controller = .ai,
 };
 
 pub fn create(allocator: std.mem.Allocator, config: Config) !*Paddle {
@@ -24,16 +31,19 @@ pub fn create(allocator: std.mem.Allocator, config: Config) !*Paddle {
     paddle.* = .{
         .position = config.position,
         .player_number = config.player_number,
+        .controller = config.controller,
     };
     return paddle;
 }
 
 pub fn update(self: *Paddle) void {
-    if (zonk.input_state.isKeyDown(.up)) {
-        self.position[1] += self.speed;
-    }
-    if (zonk.input_state.isKeyDown(.down)) {
-        self.position[1] -= self.speed;
+    if (self.controller == .human) {
+        if (zonk.input_state.isKeyDown(.up)) {
+            self.position[1] += self.speed;
+        }
+        if (zonk.input_state.isKeyDown(.down)) {
+            self.position[1] -= self.speed;
+        }
     }
 }
 

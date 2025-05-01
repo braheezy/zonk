@@ -17,6 +17,7 @@ const PongGame = struct {
         const left_paddle = try Paddle.create(allocator, .{
             .position = .{ -300.0, 0.0 }, // Will be adjusted by layout
             .player_number = 1,
+            .controller = .human,
         });
 
         const right_paddle = try Paddle.create(allocator, .{
