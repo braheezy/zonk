@@ -14,30 +14,87 @@ velocity: [2]f32,
 radius: f32 = 10.0,
 speed: f32 = 5.0,
 is_visible: bool = true,
+screen_height: f32 = 600.0, // Default screen height, will be updated in layout
 
 pub const Config = struct {
     position: [2]f32 = .{ 0.0, 0.0 }, // Start at center
-    initial_direction: f32 = -45.0, // Angle in degrees, measured from positive x-axis
+    initial_direction: ?f32 = null, // If null, will use random diagonal direction
 };
+
+// Helper function to generate random diagonal velocity
+fn generateRandomVelocity(random: std.Random) [2]f32 {
+    // First randomly choose between left (-1) and right (1)
+    const x_dir: f32 = if (random.boolean()) 1.0 else -1.0;
+    // Then randomly choose between up (1) and down (-1)
+    const y_dir: f32 = if (random.boolean()) 1.0 else -1.0;
+
+    // Set diagonal velocity with normalized components to maintain constant speed
+    const diagonal_factor = @sqrt(0.5); // 1/√2 to normalize diagonal vector
+    return .{
+        x_dir * 5.0 * diagonal_factor,
+        y_dir * 5.0 * diagonal_factor,
+    };
+}
 
 pub fn create(allocator: std.mem.Allocator, config: Config) !*Ball {
     const ball = try allocator.create(Ball);
+    var prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    const random = prng.random();
 
-    // Convert angle to radians and calculate initial velocity
-    const angle_rad = config.initial_direction * std.math.pi / 180.0;
-    const initial_velocity = [2]f32{
-        @cos(angle_rad) * 5.0, // x component
-        @sin(angle_rad) * 5.0, // y component
-    };
+    // Calculate initial velocity
+    var initial_velocity: [2]f32 = undefined;
+    if (config.initial_direction) |direction| {
+        const angle_rad = direction * std.math.pi / 180.0;
+        initial_velocity = .{
+            @cos(angle_rad) * 5.0,
+            @sin(angle_rad) * 5.0,
+        };
+    } else {
+        initial_velocity = generateRandomVelocity(random);
+    }
 
     ball.* = .{
         .position = config.position,
         .velocity = initial_velocity,
+        .radius = 10.0,
+        .speed = 5.0,
+        .is_visible = true,
+        .screen_height = 600.0,
     };
     return ball;
 }
 
+pub fn reset(self: *Ball) !void {
+    var prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    const random = prng.random();
+
+    // Reset position to center
+    self.position = .{ 0.0, 0.0 };
+    // Generate new random velocity
+    self.velocity = generateRandomVelocity(random);
+    // Ensure ball is visible
+    self.is_visible = true;
+}
+
 pub fn update(self: *Ball) void {
+    // Check for ceiling and floor collisions before updating position
+    const half_height = self.screen_height / 2.0;
+    const next_y_pos = self.position[1] + self.velocity[1];
+
+    // Account for ball radius in collision detection
+    if (next_y_pos + self.radius >= half_height or next_y_pos - self.radius <= -half_height) {
+        // Bounce by inverting y velocity
+        self.velocity[1] = -self.velocity[1];
+    }
+
     // Update position based on velocity
     self.position[0] += self.velocity[0];
     self.position[1] += self.velocity[1];
@@ -75,9 +132,7 @@ pub fn draw(self: *Ball, screen: *RGBAImage) void {
 }
 
 pub fn layout(self: *Ball, width: usize, height: usize) void {
-    _ = self;
     _ = width;
-    _ = height;
-    // Ball doesn't need layout adjustments as it starts in the center
-    // and its size is fixed
+    // Update the screen height for collision detection
+    self.screen_height = @floatFromInt(height);
 }

@@ -19,6 +19,7 @@ player_number: u8,
 speed: f32 = 6.0,
 controller: Controller,
 size: struct { width: f32, height: f32 } = .{ .width = 20.0, .height = 100.0 },
+initial_position: [2]f32, // Store initial position for reset
 
 pub const Config = struct {
     position: [2]f32,
@@ -32,6 +33,7 @@ pub fn create(allocator: std.mem.Allocator, config: Config) !*Paddle {
         .position = config.position,
         .player_number = config.player_number,
         .controller = config.controller,
+        .initial_position = config.position,
     };
     return paddle;
 }
@@ -84,4 +86,8 @@ pub fn layout(self: *Paddle, width: usize, height: usize) void {
     // Scale paddle size based on screen height
     self.size.height = @as(f32, @floatFromInt(height)) / 6.0; // Paddle takes up 1/6th of screen height
     self.size.width = 20.0; // Fixed width
+}
+
+pub fn reset(self: *Paddle) void {
+    self.position = self.initial_position;
 }

@@ -47,9 +47,20 @@ const PongGame = struct {
     }
 
     pub fn update(self: *PongGame) void {
+        // Check for game reset
+        if (zonk.input_state.isKeyDown(.space)) {
+            self.reset() catch unreachable;
+        }
+
         self.left_paddle.update();
         self.right_paddle.update();
         self.ball.update();
+    }
+
+    pub fn reset(self: *PongGame) !void {
+        self.left_paddle.reset();
+        self.right_paddle.reset();
+        try self.ball.reset();
     }
 
     pub fn draw(self: *PongGame, screen: *image.RGBAImage) void {
