@@ -16,6 +16,7 @@ screen_bind_group: zgpu.BindGroupHandle,
 pipeline: zgpu.RenderPipelineHandle,
 vertex_buffer: zgpu.wgpu.Buffer,
 index_buffer: zgpu.wgpu.Buffer,
+padded_buffer: []u8,
 
 pub const Vertex2D = struct {
     position: [2]f32,
@@ -44,6 +45,7 @@ pub fn init(
         .pipeline = undefined,
         .vertex_buffer = undefined,
         .index_buffer = undefined,
+        .padded_buffer = undefined,
     };
 
     // Create an RGBA image for the screen
@@ -211,11 +213,19 @@ pub fn init(
 
     graphics.pipeline = gfx.createRenderPipeline(pipeline_layout, pipeline_desc);
 
+    // Calculate padded buffer size and allocate it
+    const unpadded_bytes_per_row = width * 4;
+    const alignment: u16 = 256;
+    const padded_bytes_per_row = (unpadded_bytes_per_row + alignment - 1) & ~(alignment - 1);
+    const padded_size = padded_bytes_per_row * height;
+    graphics.padded_buffer = try allocator.alloc(u8, padded_size);
+
     return graphics;
 }
 
 pub fn deinit(self: *Graphics) void {
     self.allocator.free(self.screen.pixels);
+    self.allocator.free(self.padded_buffer);
     self.gfx.releaseResource(self.screen_texture);
     self.gfx.releaseResource(self.screen_texture_view);
     self.gfx.releaseResource(self.screen_bind_group);
@@ -252,17 +262,12 @@ pub fn render(self: *Graphics) void {
     const alignment: u16 = 256;
     const padded_bytes_per_row = (unpadded_bytes_per_row + alignment - 1) & ~(alignment - 1);
 
-    // Create a padded buffer
-    const padded_size = padded_bytes_per_row * height;
-    const padded_buffer = self.allocator.alloc(u8, padded_size) catch unreachable;
-    defer self.allocator.free(padded_buffer);
-
     // Copy pixels into padded buffer
     var y: usize = 0;
     while (y < height) : (y += 1) {
         const src_start = y * unpadded_bytes_per_row;
         const dst_start = y * padded_bytes_per_row;
-        @memcpy(padded_buffer[dst_start..][0..unpadded_bytes_per_row], pixels[src_start..][0..unpadded_bytes_per_row]);
+        @memcpy(self.padded_buffer[dst_start..][0..unpadded_bytes_per_row], pixels[src_start..][0..unpadded_bytes_per_row]);
     }
 
     // Write pixels to texture
@@ -281,7 +286,7 @@ pub fn render(self: *Graphics) void {
             .depth_or_array_layers = 1,
         },
         u8,
-        padded_buffer,
+        self.padded_buffer,
     );
 
     // Set up vertices for a fullscreen quad
