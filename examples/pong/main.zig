@@ -3,12 +3,13 @@ const zonk = @import("zonk");
 const image = @import("image");
 
 const Paddle = @import("Paddle.zig");
-// const Ball = @import("Ball.zig");
+const Ball = @import("Ball.zig");
 
 const PongGame = struct {
     allocator: std.mem.Allocator,
     left_paddle: *Paddle,
     right_paddle: *Paddle,
+    ball: *Ball,
 
     pub fn init(allocator: std.mem.Allocator) !*PongGame {
         const game = try allocator.create(PongGame);
@@ -25,10 +26,14 @@ const PongGame = struct {
             .player_number = 2,
         });
 
+        // Create ball with default configuration (starts in center)
+        const ball = try Ball.create(allocator, .{});
+
         game.* = .{
             .allocator = allocator,
             .left_paddle = left_paddle,
             .right_paddle = right_paddle,
+            .ball = ball,
         };
 
         return game;
@@ -37,26 +42,30 @@ const PongGame = struct {
     pub fn deinit(self: *PongGame) void {
         self.allocator.destroy(self.left_paddle);
         self.allocator.destroy(self.right_paddle);
+        self.allocator.destroy(self.ball);
         self.allocator.destroy(self);
     }
 
     pub fn update(self: *PongGame) void {
         self.left_paddle.update();
         self.right_paddle.update();
+        self.ball.update();
     }
 
     pub fn draw(self: *PongGame, screen: *image.RGBAImage) void {
         // Clear screen to black
         screen.clear(.{ .rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 } });
 
-        // Draw both paddles
+        // Draw both paddles and ball
         self.left_paddle.draw(screen);
         self.right_paddle.draw(screen);
+        self.ball.draw(screen);
     }
 
     pub fn layout(self: *PongGame, width: usize, height: usize) void {
         self.left_paddle.layout(width, height);
         self.right_paddle.layout(width, height);
+        self.ball.layout(width, height);
     }
 };
 
