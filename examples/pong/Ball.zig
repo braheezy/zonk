@@ -5,6 +5,7 @@ const color = @import("color");
 const Rectangle = image.Rectangle;
 const Drawer = image.Drawer;
 const RGBAImage = image.RGBAImage;
+const Paddle = @import("Paddle.zig");
 
 const Ball = @This();
 
@@ -20,6 +21,29 @@ pub const Config = struct {
     position: [2]f32 = .{ 0.0, 0.0 }, // Start at center
     initial_direction: ?f32 = null, // If null, will use random diagonal direction
 };
+
+// Helper function to check collision with a paddle
+fn checkPaddleCollision(self: *Ball, paddle: *const Paddle) bool {
+    // Get paddle bounds
+    const paddle_half_width = paddle.size.width / 2.0;
+    const paddle_half_height = paddle.size.height / 2.0;
+    const paddle_left = paddle.position[0] - paddle_half_width;
+    const paddle_right = paddle.position[0] + paddle_half_width;
+    const paddle_top = paddle.position[1] + paddle_half_height;
+    const paddle_bottom = paddle.position[1] - paddle_half_height;
+
+    // Get ball bounds
+    const ball_left = self.position[0] - self.radius;
+    const ball_right = self.position[0] + self.radius;
+    const ball_top = self.position[1] + self.radius;
+    const ball_bottom = self.position[1] - self.radius;
+
+    // Check for overlap in both x and y axes
+    const x_overlap = ball_right >= paddle_left and ball_left <= paddle_right;
+    const y_overlap = ball_top >= paddle_bottom and ball_bottom <= paddle_top;
+
+    return x_overlap and y_overlap;
+}
 
 // Helper function to generate random diagonal velocity
 fn generateRandomVelocity(random: std.Random) [2]f32 {
@@ -84,20 +108,30 @@ pub fn reset(self: *Ball) !void {
     self.is_visible = true;
 }
 
-pub fn update(self: *Ball) void {
-    // Check for ceiling and floor collisions before updating position
-    const half_height = self.screen_height / 2.0;
-    const next_y_pos = self.position[1] + self.velocity[1];
+pub fn update(self: *Ball, left_paddle: *const Paddle, right_paddle: *const Paddle) void {
+    // Calculate next position
+    const next_x = self.position[0] + self.velocity[0];
+    const next_y = self.position[1] + self.velocity[1];
 
-    // Account for ball radius in collision detection
-    if (next_y_pos + self.radius >= half_height or next_y_pos - self.radius <= -half_height) {
+    // Check for ceiling and floor collisions
+    const half_height = self.screen_height / 2.0;
+    if (next_y + self.radius >= half_height or next_y - self.radius <= -half_height) {
         // Bounce by inverting y velocity
         self.velocity[1] = -self.velocity[1];
     }
 
-    // Update position based on velocity
-    self.position[0] += self.velocity[0];
-    self.position[1] += self.velocity[1];
+    // Update position
+    self.position[0] = next_x;
+    self.position[1] = next_y;
+
+    // Check for paddle collisions
+    if (checkPaddleCollision(self, left_paddle) or checkPaddleCollision(self, right_paddle)) {
+        // Bounce by inverting x velocity
+        self.velocity[0] = -self.velocity[0];
+
+        // Move ball slightly away from paddle to prevent sticking
+        self.position[0] += if (self.velocity[0] > 0) self.radius else -self.radius;
+    }
 }
 
 pub fn draw(self: *Ball, screen: *RGBAImage) void {

@@ -54,7 +54,7 @@ const PongGame = struct {
 
         self.left_paddle.update();
         self.right_paddle.update();
-        self.ball.update();
+        self.ball.update(self.left_paddle, self.right_paddle);
     }
 
     pub fn reset(self: *PongGame) !void {
