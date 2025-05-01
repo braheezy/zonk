@@ -6,6 +6,8 @@ const zmath = @import("zmath");
 const ResourceManager = @import("ResourceManager.zig");
 pub const Graphics = @import("Graphics.zig");
 pub const Game = @import("Game.zig");
+const InputState = @import("input_state.zig").InputState;
+const GameConfig = @import("root.zig").GameConfig;
 
 // Vertex format for 2D/2.5D rendering
 pub const Vertex2D = struct {
@@ -22,19 +24,13 @@ pub const GameUniforms = struct {
     color: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
 };
 
-pub const GameConfig = struct {
-    title: []const u8 = "Game",
-    width: u32 = 800,
-    height: u32 = 600,
-    vsync: bool = true,
-};
-
 pub const App = @This();
 
 // Core engine state
 allocator: std.mem.Allocator,
 window: *zglfw.Window,
 graphics: *Graphics,
+input: InputState,
 
 // Game state
 delta_time: f32,
@@ -68,6 +64,7 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
         .allocator = allocator,
         .window = window,
         .graphics = undefined,
+        .input = try InputState.init(allocator),
         .delta_time = 0,
         .total_time = 0,
         .width = config.width,
@@ -101,7 +98,6 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
             },
         },
     });
-    std.debug.print("App.init - graphics context created\n", .{});
 
     // Initialize graphics system
     app.graphics = try Graphics.init(
@@ -120,6 +116,15 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
 fn createCallbacks(self: *App) void {
     // Get pointer to App to pass to callbacks
     zglfw.setWindowUserPointer(self.window, @ptrCast(self));
+
+    _ = zglfw.setKeyCallback(self.window, struct {
+        fn cb(window: *zglfw.Window, key: zglfw.Key, scancode: i32, action: zglfw.Action, mods: zglfw.Mods) callconv(.C) void {
+            _ = scancode;
+            _ = mods;
+            const app = window.getUserPointer(App) orelse unreachable;
+            app.input.setKeyState(key, action != .release);
+        }
+    }.cb);
 
     // _ = zglfw.setCursorPosCallback(self.window, struct {
     //     fn cb(window: *zglfw.Window, xpos: f64, ypos: f64) callconv(.C) void {
@@ -155,49 +160,10 @@ fn createCallbacks(self: *App) void {
     //     }
     // }.cb);
 
-    // _ = zglfw.setMouseButtonCallback(self.window, struct {
-    //     fn cb(
-    //         window: *zglfw.Window,
-    //         button: zglfw.MouseButton,
-    //         action: zglfw.Action,
-    //         mods: zglfw.Mods,
-    //     ) callconv(.C) void {
-    //         // If ImGui is using the mouse, ignore the event
-    //         if (zgui.io.getWantCaptureMouse()) return;
-
-    //         const app = window.getUserPointer(App) orelse unreachable;
-    //         _ = mods;
-
-    //         if (button == .left) {
-    //             switch (action) {
-    //                 .press => {
-    //                     app.drag_state.active = true;
-    //                     const cursor_pos = app.window.getCursorPos();
-    //                     app.drag_state.start_position = .{ cursor_pos[0], cursor_pos[1] };
-    //                     app.drag_state.start_camera = app.camera;
-    //                 },
-    //                 .release => {
-    //                     app.drag_state.active = false;
-    //                 },
-    //                 else => {},
-    //             }
-    //         }
-    //     }
-    // }.cb);
-
-    // _ = zglfw.setScrollCallback(self.window, struct {
-    //     fn cb(window: *zglfw.Window, x_offset: f64, y_offset: f64) callconv(.C) void {
-    //         const app = window.getUserPointer(App) orelse unreachable;
-    //         _ = x_offset;
-
-    //         app.camera.zoom += @as(f32, @floatCast(y_offset)) * DragState.scroll_sensitivity;
-    //         app.camera.zoom = zmath.clamp(app.camera.zoom, -2.0, 2.0);
-    //         app.updateView();
-    //     }
-    // }.cb);
 }
 
 pub fn deinit(self: *App) void {
+    self.input.deinit();
     // Cleanup graphics resources
     self.graphics.deinit();
 
@@ -212,51 +178,54 @@ pub fn isRunning(self: *App) bool {
         self.window.getKey(.escape) != .press;
 }
 
-pub fn run(
-    comptime T: type,
-    instance: *T,
-    allocator: std.mem.Allocator,
-    config: GameConfig,
-) !void {
-    const app = try App.init(allocator, config);
-    defer app.deinit();
+// pub fn run(
+//     comptime T: type,
+//     instance: *T,
+//     allocator: std.mem.Allocator,
+//     config: GameConfig,
+// ) !void {
+//     const app = try App.init(allocator, config);
+//     defer app.deinit();
 
-    app.game = Game.init(T, instance);
+//     app.game = Game.init(T, instance);
 
-    const fps = 60;
-    const frame_ns = std.time.ns_per_s / fps;
-    var timer = try std.time.Timer.start();
-    var acc: u64 = 0;
+//     const fps = 60;
+//     const frame_ns = std.time.ns_per_s / fps;
+//     var timer = try std.time.Timer.start();
+//     var acc: u64 = 0;
 
-    while (app.isRunning()) {
-        zglfw.pollEvents();
+//     while (app.isRunning()) {
+//         zglfw.pollEvents();
 
-        const elapsed = timer.lap();
-        acc += elapsed;
+//         const elapsed = timer.lap();
+//         acc += elapsed;
 
-        // Update timing
-        app.total_time += @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(std.time.ns_per_s));
-        app.delta_time = @as(f32, @floatFromInt(frame_ns)) / @as(f32, @floatFromInt(std.time.ns_per_s));
+//         // Update input state
+//         app.input.update();
 
-        // Dispatch fixed-dt updates
-        while (acc >= frame_ns) : (acc -= frame_ns) {
-            if (app.game) |*game| {
-                game.update();
-            }
-        }
+//         // Update timing
+//         app.total_time += @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(std.time.ns_per_s));
+//         app.delta_time = @as(f32, @floatFromInt(frame_ns)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
-        // Layout and draw
-        if (app.game) |*game| {
-            game.layout(app.width, app.height);
-            game.draw(app.graphics.getScreen());
-            app.graphics.render();
-        }
-        app.window.swapBuffers();
+//         // Dispatch fixed-dt updates
+//         while (acc >= frame_ns) : (acc -= frame_ns) {
+//             if (app.game) |*game| {
+//                 game.update();
+//             }
+//         }
 
-        // Sleep if we're running too fast
-        const frame_time = timer.read();
-        if (frame_time < frame_ns) {
-            std.time.sleep(frame_ns - frame_time);
-        }
-    }
-}
+//         // Layout and draw
+//         if (app.game) |*game| {
+//             game.layout(app.width, app.height);
+//             game.draw(app.graphics.getScreen());
+//             app.graphics.render();
+//         }
+//         app.window.swapBuffers();
+
+//         // Sleep if we're running too fast
+//         const frame_time = timer.read();
+//         if (frame_time < frame_ns) {
+//             std.time.sleep(frame_ns - frame_time);
+//         }
+//     }
+// }

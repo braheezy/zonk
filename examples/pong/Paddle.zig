@@ -11,7 +11,7 @@ const Paddle = @This();
 // Game state
 position: [2]f32,
 player_number: u8,
-speed: f32 = 400.0,
+speed: f32 = 6.0,
 size: struct { width: f32, height: f32 } = .{ .width = 20.0, .height = 100.0 },
 
 pub const Config = struct {
@@ -29,8 +29,12 @@ pub fn create(allocator: std.mem.Allocator, config: Config) !*Paddle {
 }
 
 pub fn update(self: *Paddle) void {
-    _ = self;
-    // TODO: Add input handling
+    if (zonk.input_state.isKeyDown(.up)) {
+        self.position[1] += self.speed;
+    }
+    if (zonk.input_state.isKeyDown(.down)) {
+        self.position[1] -= self.speed;
+    }
 }
 
 pub fn draw(self: *Paddle, screen: *RGBAImage) void {
@@ -57,9 +61,6 @@ pub fn draw(self: *Paddle, screen: *RGBAImage) void {
 }
 
 pub fn layout(self: *Paddle, width: usize, height: usize) void {
-    // Update Y position to be centered vertically
-    self.position[1] = 0; // Keep vertical center position
-
     // Update X position based on player number and window width
     const padding = 50.0; // Distance from screen edge
     if (self.player_number == 1) {

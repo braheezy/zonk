@@ -40,7 +40,6 @@ const PongGame = struct {
     }
 
     pub fn update(self: *PongGame) void {
-        std.debug.print("PongGame.update\n", .{});
         self.left_paddle.update();
         self.right_paddle.update();
     }
