@@ -1,5 +1,5 @@
 const std = @import("std");
-const zglfw = @import("zglfw");
+pub const zglfw = @import("zglfw");
 
 pub const Game = @import("Game.zig");
 pub const InputState = @import("input_state.zig");

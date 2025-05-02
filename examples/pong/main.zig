@@ -18,12 +18,13 @@ const PongGame = struct {
         const left_paddle = try Paddle.create(allocator, .{
             .position = .{ -300.0, 0.0 }, // Will be adjusted by layout
             .player_number = 1,
-            .controller = .human,
+            .controller = .human, // Left paddle uses WASD
         });
 
         const right_paddle = try Paddle.create(allocator, .{
             .position = .{ 300.0, 0.0 }, // Will be adjusted by layout
             .player_number = 2,
+            .controller = .human, // Right paddle uses arrow keys
         });
 
         // Create ball with default configuration (starts in center)
