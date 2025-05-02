@@ -10,6 +10,7 @@ const PongGame = struct {
     left_paddle: *Paddle,
     right_paddle: *Paddle,
     ball: *Ball,
+    game_over: bool = false,
 
     pub fn init(allocator: std.mem.Allocator) !*PongGame {
         const game = try allocator.create(PongGame);
@@ -24,7 +25,7 @@ const PongGame = struct {
         const right_paddle = try Paddle.create(allocator, .{
             .position = .{ 300.0, 0.0 }, // Will be adjusted by layout
             .player_number = 2,
-            .controller = .human, // Right paddle uses arrow keys
+            .controller = .ai, // Right paddle uses arrow keys
         });
 
         // Create ball with default configuration (starts in center)
@@ -48,27 +49,43 @@ const PongGame = struct {
     }
 
     pub fn update(self: *PongGame) void {
+        // If game is over, only allow reset
+        if (self.game_over) {
+            if (zonk.input_state.isKeyDown(.space)) {
+                self.reset() catch unreachable;
+                self.game_over = false;
+            }
+            return;
+        }
         // Check for game reset
         if (zonk.input_state.isKeyDown(.space)) {
             self.reset() catch unreachable;
         }
-
-        self.left_paddle.update();
-        self.right_paddle.update();
+        self.left_paddle.update(self.ball);
+        self.right_paddle.update(self.ball);
         self.ball.update(self.left_paddle, self.right_paddle);
+        // If the ball is not visible, end the game
+        if (!self.ball.is_visible) {
+            self.game_over = true;
+        }
     }
 
     pub fn reset(self: *PongGame) !void {
         self.left_paddle.reset();
         self.right_paddle.reset();
         try self.ball.reset();
+        self.game_over = false;
     }
 
     pub fn draw(self: *PongGame, screen: *image.RGBAImage) void {
-        // Clear screen to black
-        screen.clear(.{ .rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 } });
-
-        // Draw both paddles and ball
+        if (self.game_over) {
+            // Draw dark red background
+            screen.clear(.{ .rgba = .{ .r = 80, .g = 0, .b = 0, .a = 255 } });
+        } else {
+            // Clear screen to black
+            screen.clear(.{ .rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 } });
+        }
+        // Draw both paddles and ball (optional: skip if game over)
         self.left_paddle.draw(screen);
         self.right_paddle.draw(screen);
         self.ball.draw(screen);

@@ -6,6 +6,7 @@ const Rectangle = image.Rectangle;
 const Drawer = image.Drawer;
 const RGBAImage = image.RGBAImage;
 const zglfw = zonk.zglfw;
+const Ball = @import("Ball.zig");
 
 const Controller = enum {
     ai,
@@ -61,27 +62,47 @@ pub fn create(allocator: std.mem.Allocator, config: Config) !*Paddle {
     return paddle;
 }
 
-pub fn update(self: *Paddle) void {
+fn moveAI(self: *Paddle, ball: *const Ball) void {
+    // Only move if the ball is moving towards this paddle
+    const ball_moving_towards_paddle = if (self.player_number == 1)
+        ball.velocity[0] < 0
+    else
+        ball.velocity[0] > 0;
+    if (!ball_moving_towards_paddle) return;
+
+    // Move paddle towards the ball's y position
+    const paddle_center_y = self.position[1];
+    const ball_y = ball.position[1];
+    var new_y = paddle_center_y;
+    if (ball_y > paddle_center_y + self.size.height * 0.15) {
+        new_y += self.speed;
+    } else if (ball_y < paddle_center_y - self.size.height * 0.15) {
+        new_y -= self.speed;
+    }
+    // Clamp to screen boundaries
+    const half_height = self.screen_height / 2.0;
+    const paddle_half_height = self.size.height / 2.0;
+    new_y = std.math.clamp(new_y, -half_height + paddle_half_height, half_height - paddle_half_height);
+    self.position[1] = new_y;
+}
+
+pub fn update(self: *Paddle, ball: *const Ball) void {
     if (self.controller == .human) {
         var new_y = self.position[1];
-
         if (zonk.input_state.isKeyDown(self.keys.up)) {
             new_y += self.speed;
         }
         if (zonk.input_state.isKeyDown(self.keys.down)) {
             new_y -= self.speed;
         }
-
         // Calculate paddle boundaries
         const half_height = self.screen_height / 2.0;
         const paddle_half_height = self.size.height / 2.0;
-
         // Clamp paddle position to screen boundaries
-        new_y = std.math.clamp(new_y, -half_height + paddle_half_height, // Bottom boundary
-            half_height - paddle_half_height // Top boundary
-        );
-
+        new_y = std.math.clamp(new_y, -half_height + paddle_half_height, half_height - paddle_half_height);
         self.position[1] = new_y;
+    } else if (self.controller == .ai) {
+        self.moveAI(ball);
     }
 }
 
