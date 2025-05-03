@@ -39,6 +39,9 @@
             // .hash = "zpix-0.2.0-Og3bwGoiCgCEJ5CX8AzpQWZooSJx6VcyOkxao0INNvT_",
             .path = "zpix",
         },
+        .stb_rect_pack = .{ .path = "pkg/stb_rect_pack" },
+        .harfbuzz = .{ .path = "pkg/harfbuzz" },
+        .freetype = .{ .path = "pkg/freetype" },
         // Pre-compiled WebGPU libraries for different platforms
         .dawn_x86_64_windows_gnu = .{
             .url = "https://github.com/michal-z/webgpu_dawn-x86_64-windows-gnu/archive/d3a68014e6b6b53fd330a0ccba99e4dcfffddae5.tar.gz",
@@ -57,7 +60,7 @@
         },
         .dawn_aarch64_macos = .{
             .url = "https://github.com/michal-z/webgpu_dawn-aarch64-macos/archive/d2360cdfff0cf4a780cb77aa47c57aca03cc6dfe.tar.gz",
-            .hash = "12201fe677e9c7cfb8984a36446b329d5af23d03dc1e4f79a853399529e523a007fa",
+            .hash = "N-V-__8AALVIRAIf5nfpx8-4mEo2RGsynVryPQPcHk95qFM5",
             .lazy = true,
         },
         .dawn_x86_64_macos = .{

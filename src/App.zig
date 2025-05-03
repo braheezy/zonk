@@ -47,7 +47,7 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
 
     // Create window
     zglfw.windowHint(.client_api, .no_api);
-    zglfw.windowHint(.resizable, true);
+    zglfw.windowHint(.resizable, false);
     const title_sentinel = std.fmt.allocPrintZ(allocator, "{s}", .{config.title}) catch unreachable;
     defer allocator.free(title_sentinel);
     const window = try zglfw.createWindow(
@@ -107,10 +107,23 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
         config.height,
     );
 
+    if (config.enable_text_rendering) {
+        try enableTextRendering(app);
+    }
+
     app.createCallbacks();
     std.debug.print("App.init - initialization complete\n", .{});
 
     return app;
+}
+
+pub fn enableTextRendering(self: *App) !void {
+    const content_scale_xy = self.window.getContentScale();
+    std.debug.print("Pixel scale: (x: {d}, y: {d})\n", .{ content_scale_xy[0], content_scale_xy[1] });
+    std.debug.assert(content_scale_xy[0] == content_scale_xy[1]); // Require square pixels.
+    const dpr: u32 = @intFromFloat(@round(content_scale_xy[0])); // Round to full pixels.
+
+    try self.graphics.enableTextRendering(dpr);
 }
 
 fn createCallbacks(self: *App) void {
@@ -177,55 +190,3 @@ pub fn isRunning(self: *App) bool {
     return !self.window.shouldClose() and
         self.window.getKey(.escape) != .press;
 }
-
-// pub fn run(
-//     comptime T: type,
-//     instance: *T,
-//     allocator: std.mem.Allocator,
-//     config: GameConfig,
-// ) !void {
-//     const app = try App.init(allocator, config);
-//     defer app.deinit();
-
-//     app.game = Game.init(T, instance);
-
-//     const fps = 60;
-//     const frame_ns = std.time.ns_per_s / fps;
-//     var timer = try std.time.Timer.start();
-//     var acc: u64 = 0;
-
-//     while (app.isRunning()) {
-//         zglfw.pollEvents();
-
-//         const elapsed = timer.lap();
-//         acc += elapsed;
-
-//         // Update input state
-//         app.input.update();
-
-//         // Update timing
-//         app.total_time += @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(std.time.ns_per_s));
-//         app.delta_time = @as(f32, @floatFromInt(frame_ns)) / @as(f32, @floatFromInt(std.time.ns_per_s));
-
-//         // Dispatch fixed-dt updates
-//         while (acc >= frame_ns) : (acc -= frame_ns) {
-//             if (app.game) |*game| {
-//                 game.update();
-//             }
-//         }
-
-//         // Layout and draw
-//         if (app.game) |*game| {
-//             game.layout(app.width, app.height);
-//             game.draw(app.graphics.getScreen());
-//             app.graphics.render();
-//         }
-//         app.window.swapBuffers();
-
-//         // Sleep if we're running too fast
-//         const frame_time = timer.read();
-//         if (frame_time < frame_ns) {
-//             std.time.sleep(frame_ns - frame_time);
-//         }
-//     }
-// }

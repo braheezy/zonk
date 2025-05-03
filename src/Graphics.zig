@@ -4,6 +4,8 @@ const RGBAImage = @import("image").RGBAImage;
 
 const App = @import("App.zig");
 const ResourceManager = @import("ResourceManager.zig");
+const font = @import("font.zig");
+const Printer = @import("printer.zig").Printer;
 
 pub const Graphics = @This();
 
@@ -17,6 +19,7 @@ pipeline: zgpu.RenderPipelineHandle,
 vertex_buffer: zgpu.wgpu.Buffer,
 index_buffer: zgpu.wgpu.Buffer,
 padded_buffer: []u8,
+printer: ?Printer = null,
 
 pub const Vertex2D = struct {
     position: [2]f32,
@@ -224,6 +227,11 @@ pub fn init(
 }
 
 pub fn deinit(self: *Graphics) void {
+    if (self.printer) |*printer| {
+        printer.font_library.deinit();
+        self.allocator.destroy(printer.font_library);
+        printer.deinit();
+    }
     self.allocator.free(self.screen.pixels);
     self.allocator.free(self.padded_buffer);
     self.gfx.releaseResource(self.screen_texture);
@@ -236,19 +244,27 @@ pub fn deinit(self: *Graphics) void {
     self.allocator.destroy(self);
 }
 
+pub fn enableTextRendering(self: *Graphics, dpr: u32) !void {
+    const font_library = try self.allocator.create(font.Library);
+    font_library.* = try font.Library.init(self.allocator, self.gfx, dpr);
+
+    try font_library.*.finalizeAtlas();
+
+    const printer = try Printer.init(
+        self.allocator,
+        self.gfx,
+        font_library,
+        dpr,
+    );
+    self.printer = printer;
+}
+
 pub fn getScreen(self: *Graphics) *RGBAImage {
     return &self.screen;
 }
 
-pub fn render(self: *Graphics) void {
-    // Get the current texture view from the swapchain
-    const view = self.gfx.swapchain.getCurrentTextureView();
-    defer view.release();
-
-    // Create command encoder
-    const encoder = self.gfx.device.createCommandEncoder(null);
-    defer encoder.release();
-
+// Add this new helper function for drawing the screen
+fn drawScreen(self: *Graphics, view: zgpu.wgpu.TextureView, encoder: zgpu.wgpu.CommandEncoder) void {
     // Upload screen pixels to GPU texture
     const bounds = self.screen.bounds();
     const width = @as(u32, @intCast(bounds.dX()));
@@ -342,18 +358,41 @@ pub fn render(self: *Graphics) void {
     pass.setVertexBuffer(0, self.vertex_buffer, 0, vertices.len * @sizeOf(Vertex2D));
     pass.setIndexBuffer(self.index_buffer, .uint16, 0, indices.len * @sizeOf(u16));
 
-    // Draw
+    // Draw screen
     pass.drawIndexed(indices.len, 1, 0, 0, 0);
 
     pass.end();
     pass.release();
+}
+
+pub fn render(self: *Graphics) !void {
+    // Get the current texture view from the swapchain
+    const view = self.gfx.swapchain.getCurrentTextureView();
+    defer view.release();
+
+    // Create command encoder
+    const encoder = self.gfx.device.createCommandEncoder(null);
+    defer encoder.release();
+
+    // Draw the screen (pixels/quad)
+    self.drawScreen(view, encoder);
+
+    // Draw text (printer)
+    if (self.printer) |*printer| {
+        try printer.draw(view, encoder);
+    }
 
     // Submit command buffer
     const command_buffer = encoder.finish(null);
     defer command_buffer.release();
 
     self.gfx.submit(&.{command_buffer});
-    _ = self.gfx.present();
+
+    if (self.gfx.present() == .swap_chain_resized) {
+        // self.cleanDepthBuffer();
+        // self.createDepthBuffer();
+        // self.updatePerspective();
+    }
 }
 
 pub fn drawRect(self: *Graphics, x: f32, y: f32, width: f32, height: f32, opts: DrawOptions) void {

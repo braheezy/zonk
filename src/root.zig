@@ -4,9 +4,10 @@ pub const zglfw = @import("zglfw");
 pub const Game = @import("Game.zig");
 pub const InputState = @import("input_state.zig");
 
-pub var input_state: *InputState = undefined;
-
 const App = @import("App.zig");
+
+pub var input_state: *InputState = undefined;
+pub var app: *App = undefined;
 
 // FPS tracking
 var frame_times: [120]f32 = undefined;
@@ -32,6 +33,7 @@ pub const GameConfig = struct {
     height: u32 = 600,
     vsync: bool = true,
     uncapped_fps: bool = false,
+    enable_text_rendering: bool = false,
 };
 
 pub fn run(
@@ -40,7 +42,7 @@ pub fn run(
     allocator: std.mem.Allocator,
     config: GameConfig,
 ) !void {
-    var app = try App.init(allocator, config);
+    app = try App.init(allocator, config);
     defer app.deinit();
 
     app.game = Game.init(T, instance);
@@ -76,29 +78,45 @@ pub fn run(
         app.total_time += @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(std.time.ns_per_s));
         app.delta_time = @as(f32, @floatFromInt(frame_ns)) / @as(f32, @floatFromInt(std.time.ns_per_s));
 
-        if (config.uncapped_fps) {
-            // For uncapped FPS, update and render immediately
-            if (app.game) |*game| {
+        if (app.game) |*game| {
+            if (config.uncapped_fps) {
                 game.update();
-                game.layout(app.width, app.height);
-                game.draw(app.graphics.getScreen());
-                app.graphics.render();
-            }
-        } else {
-            // For fixed FPS, accumulate updates
-            while (acc >= frame_ns) : (acc -= frame_ns) {
-                if (app.game) |*game| {
+            } else {
+                // For fixed FPS, accumulate updates
+                while (acc >= frame_ns) : (acc -= frame_ns) {
                     game.update();
                 }
             }
 
             // Layout and draw
-            if (app.game) |*game| {
-                game.layout(app.width, app.height);
-                game.draw(app.graphics.getScreen());
-                app.graphics.render();
-            }
+            game.layout(app.width, app.height);
+            game.draw(app.graphics.getScreen());
+            try app.graphics.render();
         }
+
+        // if (config.uncapped_fps) {
+        //     // For uncapped FPS, update and render immediately
+        //     if (app.game) |*game| {
+        //         game.update();
+        //         game.layout(app.width, app.height);
+        //         game.draw(app.graphics.getScreen());
+        //         try app.graphics.render();
+        //     }
+        // } else {
+        //     // For fixed FPS, accumulate updates
+        //     while (acc >= frame_ns) : (acc -= frame_ns) {
+        //         if (app.game) |*game| {
+        //             game.update();
+        //         }
+        //     }
+
+        //     // Layout and draw
+        //     if (app.game) |*game| {
+        //         game.layout(app.width, app.height);
+        //         game.draw(app.graphics.getScreen());
+        //         try app.graphics.render();
+        //     }
+        // }
 
         app.window.swapBuffers();
 
@@ -109,5 +127,16 @@ pub fn run(
                 std.time.sleep(frame_ns - frame_time);
             }
         }
+    }
+}
+
+var buffer: [1024]u8 = undefined;
+pub fn print(comptime fmt: []const u8, args: anytype, x: f32, y: f32) !void {
+    if (app.graphics.printer) |*printer| {
+        const message = try std.fmt.bufPrint(buffer[0..], fmt, args);
+
+        try printer.text(message, x, y);
+    } else {
+        return error.PrinterNotEnabled;
     }
 }

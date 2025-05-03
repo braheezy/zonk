@@ -10,23 +10,63 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // zglfw
     const zglfw = b.dependency("zglfw", .{});
     zonk_mod.addImport("zglfw", zglfw.module("root"));
 
+    // zgpu
     const zgpu = b.dependency("zgpu", .{});
     zonk_mod.addImport("zgpu", zgpu.module("root"));
 
-    const zmath = b.dependency("zmath", .{});
-    zonk_mod.addImport("zmath", zmath.module("root"));
+    // zmath
+    {
+        const zmath = b.dependency("zmath", .{});
+        zonk_mod.addImport("zmath", zmath.module("root"));
+    }
 
-    const obj_mod = b.dependency("obj", .{ .target = target, .optimize = optimize });
-    zonk_mod.addImport("obj", obj_mod.module("obj"));
+    // obj
+    {
+        const obj_mod = b.dependency("obj", .{ .target = target, .optimize = optimize });
+        zonk_mod.addImport("obj", obj_mod.module("obj"));
+    }
 
+    // zpix
     const zpix = b.dependency("zpix", .{});
-    zonk_mod.addImport("jpeg", zpix.module("jpeg"));
-    zonk_mod.addImport("png", zpix.module("png"));
-    const image_mod = zpix.module("image");
-    zonk_mod.addImport("image", image_mod);
+    {
+        zonk_mod.addImport("jpeg", zpix.module("jpeg"));
+        zonk_mod.addImport("png", zpix.module("png"));
+        const image_mod = zpix.module("image");
+        zonk_mod.addImport("image", image_mod);
+    }
+
+    // harfbuzz
+    {
+        const harfbuzz = b.dependency("harfbuzz", .{
+            .target = target,
+            .optimize = optimize,
+        });
+        zonk_mod.addImport("harfbuzz", harfbuzz.module("harfbuzz"));
+        const harfbuzz_lib = harfbuzz.artifact("harfbuzz");
+        zonk_mod.linkLibrary(harfbuzz_lib);
+    }
+
+    // stb_rect_pack
+    {
+        const stb_rect_pack = b.dependency("stb_rect_pack", .{ .target = target, .optimize = optimize });
+        zonk_mod.addImport("stb_rect_pack", stb_rect_pack.module("stb_rect_pack"));
+    }
+
+    // freetype
+    {
+        const freetype = b.dependency("freetype", .{
+            .target = target,
+            .optimize = optimize,
+            .@"enable-libpng" = true,
+        });
+        zonk_mod.addImport("freetype", freetype.module("freetype"));
+        const freetype_lib = freetype.artifact("freetype");
+        zonk_mod.linkLibrary(freetype_lib);
+    }
 
     if (target.result.os.tag != .emscripten) {
         zonk_mod.linkLibrary(zglfw.artifact("glfw"));
