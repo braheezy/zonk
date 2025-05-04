@@ -4,6 +4,8 @@ const image = @import("image");
 const Paddle = @import("Paddle.zig");
 const Ball = @import("Ball.zig");
 
+const yellow = [4]f32{ 1.0, 1.0, 0.0, 1.0 };
+
 pub const PongGame = @This();
 
 allocator: std.mem.Allocator,
@@ -90,7 +92,7 @@ pub fn draw(self: *PongGame, screen: *image.RGBAImage) void {
     self.right_paddle.draw(screen);
     self.ball.draw(screen);
 
-    zonk.print("fps: {d}", .{zonk.getFPS()}, 50, 50) catch unreachable;
+    zonk.print("fps: {d}", .{zonk.getFPS()}, 50, 50, yellow) catch unreachable;
 }
 
 pub fn layout(self: *PongGame, width: usize, height: usize) void {

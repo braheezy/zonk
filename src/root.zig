@@ -131,11 +131,11 @@ pub fn run(
 }
 
 var buffer: [1024]u8 = undefined;
-pub fn print(comptime fmt: []const u8, args: anytype, x: f32, y: f32) !void {
+pub fn print(comptime fmt: []const u8, args: anytype, x: f32, y: f32, color: [4]f32) !void {
     if (app.graphics.printer) |*printer| {
         const message = try std.fmt.bufPrint(buffer[0..], fmt, args);
 
-        try printer.text(message, x, y);
+        try printer.text(message, x, y, color);
     } else {
         return error.PrinterNotEnabled;
     }

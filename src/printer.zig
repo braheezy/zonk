@@ -10,38 +10,43 @@ const wgsl_vs =
     \\ struct VertexIn {
     \\     @location(0) position: vec2f,
     \\     @location(1) uv: vec2f,
+    \\     @location(2) color: vec4f,
     \\ };
     \\
     \\ struct VertexOut {
     \\     @builtin(position) position: vec4f,
     \\     @location(1) uv: vec2f,
+    \\     @location(2) color: vec4f,
     \\ };
     \\
     \\ @vertex fn main(in: VertexIn) -> VertexOut {
     \\     var out: VertexOut;
     \\     out.position = vec4f(in.position, 0.0, 1.0);
     \\     out.uv = in.uv;
+    \\     out.color = in.color;
     \\     return out;
     \\ }
 ;
-// TODO: now there's no support for colors as we are just rendering the RGBA of the atlas.
 const wgsl_fs =
     \\ struct VertexOut {
     \\     @builtin(position) position: vec4f,
     \\     @location(1) uv: vec2f,
+    \\     @location(2) color: vec4f,
     \\ };
     \\
     \\ @group(0) @binding(0) var t: texture_2d<f32>;
     \\ @group(0) @binding(1) var s: sampler;
     \\
     \\ @fragment fn main(in: VertexOut) -> @location(0) vec4f {
-    \\     return textureSample(t, s, in.uv);
+    \\     let tex = textureSample(t, s, in.uv);
+    \\     return tex * in.color;
     \\ }
 ;
 
 const Command = struct {
     position: [2]f32,
     text: []const u8,
+    color: [4]f32, // RGBA
 };
 
 /// Printer prints text on the screen.
@@ -96,9 +101,10 @@ pub const Printer = struct {
         const vertex_attributes = [_]wgpu.VertexAttribute{
             .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
             .{ .format = .float32x2, .offset = 2 * @sizeOf(f32), .shader_location = 1 },
+            .{ .format = .float32x4, .offset = 4 * @sizeOf(f32), .shader_location = 2 },
         };
         const vertex_buffers = [_]wgpu.VertexBufferLayout{.{
-            .array_stride = 4 * @sizeOf(f32),
+            .array_stride = 8 * @sizeOf(f32),
             .attribute_count = vertex_attributes.len,
             .attributes = &vertex_attributes,
         }};
@@ -146,7 +152,7 @@ pub const Printer = struct {
         const depth = createDepthTexture(gctx);
 
         const commands = try allocator.alloc(Command, 1024);
-        @memset(commands, .{ .position = .{ 0, 0 }, .text = "" });
+        @memset(commands, .{ .position = .{ 0, 0 }, .text = "", .color = .{ 1, 1, 1, 1 } });
 
         return Printer{
             .gctx = gctx,
@@ -165,8 +171,8 @@ pub const Printer = struct {
         };
     }
 
-    pub fn text(self: *Printer, value: []const u8, x: f32, y: f32) !void {
-        self.commands[self.command_count] = .{ .position = .{ x, y }, .text = value };
+    pub fn text(self: *Printer, value: []const u8, x: f32, y: f32, color: [4]f32) !void {
+        self.commands[self.command_count] = .{ .position = .{ x, y }, .text = value, .color = color };
         self.command_count += 1;
     }
 
@@ -187,11 +193,11 @@ pub const Printer = struct {
         // TODO: store previous buffer and detect if it is still valid and only render if not.
         const vertex_buffer = self.gctx.createBuffer(.{
             .usage = .{ .copy_dst = true, .vertex = true },
-            .size = glyph_count * 2 * 12 * @sizeOf(f32),
+            .size = glyph_count * 2 * 12 * @sizeOf(f32) * 2, // *2 for color
         });
         defer self.gctx.releaseResource(vertex_buffer);
 
-        const vertex_data = try self.allocator.alloc(f32, glyph_count * 2 * 12);
+        const vertex_data = try self.allocator.alloc(f32, glyph_count * 2 * 12 * 2); // *2 for color
         defer self.allocator.free(vertex_data);
 
         var i: u32 = 0;
@@ -216,43 +222,69 @@ pub const Printer = struct {
                 const w: f32 = s_x / screen_width * 2;
                 const h: f32 = s_y / screen_height * 2;
 
+                const color = value.color;
+
                 // 0
                 vertex_data[i + 0] = x;
                 vertex_data[i + 1] = y - h;
                 vertex_data[i + 2] = p_x / atlas_size;
                 vertex_data[i + 3] = (p_y + s_y) / atlas_size;
+                vertex_data[i + 4] = color[0];
+                vertex_data[i + 5] = color[1];
+                vertex_data[i + 6] = color[2];
+                vertex_data[i + 7] = color[3];
 
                 // 1
-                vertex_data[i + 4] = x + w;
-                vertex_data[i + 5] = y - h;
-                vertex_data[i + 6] = (p_x + s_x) / atlas_size;
-                vertex_data[i + 7] = (p_y + s_y) / atlas_size;
+                vertex_data[i + 8] = x + w;
+                vertex_data[i + 9] = y - h;
+                vertex_data[i + 10] = (p_x + s_x) / atlas_size;
+                vertex_data[i + 11] = (p_y + s_y) / atlas_size;
+                vertex_data[i + 12] = color[0];
+                vertex_data[i + 13] = color[1];
+                vertex_data[i + 14] = color[2];
+                vertex_data[i + 15] = color[3];
 
                 // 2
-                vertex_data[i + 8] = x;
-                vertex_data[i + 9] = y;
-                vertex_data[i + 10] = p_x / atlas_size;
-                vertex_data[i + 11] = p_y / atlas_size;
+                vertex_data[i + 16] = x;
+                vertex_data[i + 17] = y;
+                vertex_data[i + 18] = p_x / atlas_size;
+                vertex_data[i + 19] = p_y / atlas_size;
+                vertex_data[i + 20] = color[0];
+                vertex_data[i + 21] = color[1];
+                vertex_data[i + 22] = color[2];
+                vertex_data[i + 23] = color[3];
 
                 // 3
-                vertex_data[i + 12] = x + w;
-                vertex_data[i + 13] = y - h;
-                vertex_data[i + 14] = (p_x + s_x) / atlas_size;
-                vertex_data[i + 15] = (p_y + s_y) / atlas_size;
+                vertex_data[i + 24] = x + w;
+                vertex_data[i + 25] = y - h;
+                vertex_data[i + 26] = (p_x + s_x) / atlas_size;
+                vertex_data[i + 27] = (p_y + s_y) / atlas_size;
+                vertex_data[i + 28] = color[0];
+                vertex_data[i + 29] = color[1];
+                vertex_data[i + 30] = color[2];
+                vertex_data[i + 31] = color[3];
 
                 // 4
-                vertex_data[i + 16] = x + w;
-                vertex_data[i + 17] = y;
-                vertex_data[i + 18] = (p_x + s_x) / atlas_size;
-                vertex_data[i + 19] = p_y / atlas_size;
+                vertex_data[i + 32] = x + w;
+                vertex_data[i + 33] = y;
+                vertex_data[i + 34] = (p_x + s_x) / atlas_size;
+                vertex_data[i + 35] = p_y / atlas_size;
+                vertex_data[i + 36] = color[0];
+                vertex_data[i + 37] = color[1];
+                vertex_data[i + 38] = color[2];
+                vertex_data[i + 39] = color[3];
 
                 // 5
-                vertex_data[i + 20] = x;
-                vertex_data[i + 21] = y;
-                vertex_data[i + 22] = p_x / atlas_size;
-                vertex_data[i + 23] = p_y / atlas_size;
+                vertex_data[i + 40] = x;
+                vertex_data[i + 41] = y;
+                vertex_data[i + 42] = p_x / atlas_size;
+                vertex_data[i + 43] = p_y / atlas_size;
+                vertex_data[i + 44] = color[0];
+                vertex_data[i + 45] = color[1];
+                vertex_data[i + 46] = color[2];
+                vertex_data[i + 47] = color[3];
 
-                i += 24;
+                i += 48;
             }
         }
 
@@ -290,7 +322,7 @@ pub const Printer = struct {
         pass.setBindGroup(0, bind_group, &.{});
         pass.draw(glyph_count * 6, 1, 0, 0);
 
-        @memset(self.commands, .{ .position = .{ 0, 0 }, .text = "" });
+        @memset(self.commands, .{ .position = .{ 0, 0 }, .text = "", .color = .{ 1, 1, 1, 1 } });
         self.command_count = 0;
     }
 
