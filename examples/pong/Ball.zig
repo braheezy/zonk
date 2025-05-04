@@ -16,6 +16,7 @@ radius: f32 = 10.0,
 speed: f32 = 5.0,
 is_visible: bool = true,
 screen_height: f32 = 600.0, // Default screen height, will be updated in layout
+player_scored: ?u8 = null, // Player 1 or 2 who scored, or null if no one scored yet
 
 pub const Config = struct {
     position: [2]f32 = .{ 0.0, 0.0 }, // Start at center
@@ -106,6 +107,8 @@ pub fn reset(self: *Ball) !void {
     self.velocity = generateRandomVelocity(random);
     // Ensure ball is visible
     self.is_visible = true;
+    // Reset player_scored flag
+    self.player_scored = null;
 }
 
 pub fn update(self: *Ball, left_paddle: *const Paddle, right_paddle: *const Paddle) void {
@@ -145,10 +148,21 @@ pub fn draw(self: *Ball, screen: *RGBAImage) void {
     const x = @as(i32, @intFromFloat(self.position[0] + @as(f32, @floatFromInt(screen_width)) / 2.0));
     const y = @as(i32, @intFromFloat(self.position[1] + @as(f32, @floatFromInt(screen_height)) / 2.0));
 
-    // Check if ball is off screen
-    if (x < 0 or x >= @as(i32, @intCast(screen_width)) or
-        y < 0 or y >= @as(i32, @intCast(screen_height)))
-    {
+    // Check if ball is off screen horizontally (scoring)
+    if (x < 0) {
+        // Ball went off the left side, player 2 (right) scores
+        self.is_visible = false;
+        self.player_scored = 2;
+        return;
+    } else if (x >= @as(i32, @intCast(screen_width))) {
+        // Ball went off the right side, player 1 (left) scores
+        self.is_visible = false;
+        self.player_scored = 1;
+        return;
+    }
+
+    // Check if ball is off screen vertically
+    if (y < 0 or y >= @as(i32, @intCast(screen_height))) {
         self.is_visible = false;
         return;
     }

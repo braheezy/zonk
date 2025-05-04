@@ -77,9 +77,24 @@ pub fn update(self: *PongGame) void {
     self.left_paddle.update(self.ball);
     self.right_paddle.update(self.ball);
     self.ball.update(self.left_paddle, self.right_paddle);
-    // If the ball is not visible, end the game
+
+    // Check if a player scored
     if (!self.ball.is_visible) {
-        self.game_over = true;
+        if (self.ball.player_scored) |player| {
+            // Increment the score for the player who scored
+            if (player == 1) {
+                self.score_left += 1;
+            } else if (player == 2) {
+                self.score_right += 1;
+            }
+
+            // Reset the ball (but not the paddles or score)
+            self.ball.reset() catch unreachable;
+        } else {
+            // Ball went off top/bottom, just reset it
+            // this should not ever happen
+            self.ball.reset() catch unreachable;
+        }
     }
 }
 
@@ -88,6 +103,8 @@ pub fn reset(self: *PongGame) !void {
     self.right_paddle.reset();
     try self.ball.reset();
     self.game_over = false;
+    self.score_left = 0;
+    self.score_right = 0;
 }
 
 fn drawDottedLine(self: *PongGame, screen: *image.RGBAImage) void {
@@ -122,16 +139,11 @@ fn drawDottedLine(self: *PongGame, screen: *image.RGBAImage) void {
 }
 
 pub fn draw(self: *PongGame, screen: *image.RGBAImage) void {
-    if (self.game_over) {
-        // Draw dark red background
-        screen.clear(.{ .rgba = .{ .r = 80, .g = 0, .b = 0, .a = 255 } });
-    } else {
-        // Clear screen to black
-        screen.clear(.{ .rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 } });
+    // Clear screen to black
+    screen.clear(.{ .rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 } });
 
-        // Draw dotted line down the middle
-        self.drawDottedLine(screen);
-    }
+    // Draw dotted line down the middle
+    self.drawDottedLine(screen);
 
     // Draw both paddles and ball
     self.left_paddle.draw(screen);
