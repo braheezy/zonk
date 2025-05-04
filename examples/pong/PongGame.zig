@@ -3,8 +3,13 @@ const std = @import("std");
 const image = @import("image");
 const Paddle = @import("Paddle.zig");
 const Ball = @import("Ball.zig");
+const color = @import("color");
+const Rectangle = image.Rectangle;
+const Drawer = image.Drawer;
 
 const yellow = [4]f32{ 1.0, 1.0, 0.0, 1.0 };
+const white = [4]f32{ 1.0, 1.0, 1.0, 1.0 };
+const padding_top = 100;
 
 pub const PongGame = @This();
 
@@ -13,6 +18,10 @@ left_paddle: *Paddle,
 right_paddle: *Paddle,
 ball: *Ball,
 game_over: bool = false,
+score_left: u32 = 0,
+score_right: u32 = 0,
+window_width: usize = 0,
+window_height: usize = 0,
 
 pub fn init(allocator: std.mem.Allocator) !*PongGame {
     const game = try allocator.create(PongGame);
@@ -38,6 +47,8 @@ pub fn init(allocator: std.mem.Allocator) !*PongGame {
         .left_paddle = left_paddle,
         .right_paddle = right_paddle,
         .ball = ball,
+        .score_left = 0,
+        .score_right = 0,
     };
 
     return game;
@@ -79,6 +90,37 @@ pub fn reset(self: *PongGame) !void {
     self.game_over = false;
 }
 
+fn drawDottedLine(self: *PongGame, screen: *image.RGBAImage) void {
+    _ = self;
+    const bounds = screen.bounds();
+    const width = bounds.dX();
+    const height = bounds.dY();
+
+    const center_x = @divFloor(width, 2);
+    const dot_height = 10;
+    const gap_height = 10;
+
+    var d = Drawer.init(screen);
+    const white_color = color.Color{ .rgba = .{ .r = 255, .g = 255, .b = 255, .a = 255 } };
+
+    var y: usize = 0;
+    while (y < height) {
+        // Draw a dot segment
+        const dot_end = @min(y + dot_height, @as(usize, @intCast(height)));
+
+        // Create a rectangle for the dot segment
+        const dot_rect = Rectangle{
+            .min = .{ .x = center_x - 1, .y = @intCast(y) },
+            .max = .{ .x = center_x + 1, .y = @intCast(dot_end) },
+        };
+
+        d.fillRect(dot_rect, white_color);
+
+        // Skip gap
+        y = dot_end + gap_height;
+    }
+}
+
 pub fn draw(self: *PongGame, screen: *image.RGBAImage) void {
     if (self.game_over) {
         // Draw dark red background
@@ -86,16 +128,27 @@ pub fn draw(self: *PongGame, screen: *image.RGBAImage) void {
     } else {
         // Clear screen to black
         screen.clear(.{ .rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 } });
+
+        // Draw dotted line down the middle
+        self.drawDottedLine(screen);
     }
-    // Draw both paddles and ball (optional: skip if game over)
+
+    // Draw both paddles and ball
     self.left_paddle.draw(screen);
     self.right_paddle.draw(screen);
     self.ball.draw(screen);
 
-    zonk.print("fps: {d}", .{zonk.getFPS()}, 50, 50, yellow) catch unreachable;
+    const center_x: f32 = @floatFromInt(self.window_width / 2);
+    zonk.print("{d}", .{self.score_left}, center_x - 100, padding_top, white) catch unreachable;
+    zonk.print("{d}", .{self.score_right}, center_x + 100, padding_top, white) catch unreachable;
+
+    // Draw FPS counter at bottom left corner with absolute coordinates
+    zonk.print("fps: {d:02}", .{zonk.getFPS()}, 50, @floatFromInt(self.window_height - 50), yellow) catch unreachable;
 }
 
 pub fn layout(self: *PongGame, width: usize, height: usize) void {
+    self.window_width = width;
+    self.window_height = height;
     self.left_paddle.layout(width, height);
     self.right_paddle.layout(width, height);
     self.ball.layout(width, height);

@@ -8,7 +8,7 @@ const stb_rect_pack = @import("stb_rect_pack.zig");
 /// Margin around each glyph in the atlas.
 const MARGIN_PX = 1;
 
-const font_size = 18;
+const font_size = 24;
 
 const FontMapping = enum(usize) {
     Latin = 0,

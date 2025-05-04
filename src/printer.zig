@@ -61,8 +61,7 @@ pub const Printer = struct {
     depth_texture: zgpu.TextureHandle,
     depth_texture_view: zgpu.TextureViewHandle,
 
-    command_count: u32,
-    commands: []Command,
+    commands: std.ArrayList(Command),
 
     dpr: u32,
 
@@ -151,8 +150,7 @@ pub const Printer = struct {
 
         const depth = createDepthTexture(gctx);
 
-        const commands = try allocator.alloc(Command, 1024);
-        @memset(commands, .{ .position = .{ 0, 0 }, .text = "", .color = .{ 1, 1, 1, 1 } });
+        const commands = try std.ArrayList(Command).initCapacity(allocator, 1024);
 
         return Printer{
             .gctx = gctx,
@@ -164,7 +162,6 @@ pub const Printer = struct {
             .depth_texture = depth.texture,
             .depth_texture_view = depth.view,
 
-            .command_count = 0,
             .commands = commands,
 
             .dpr = dpr,
@@ -172,8 +169,11 @@ pub const Printer = struct {
     }
 
     pub fn text(self: *Printer, value: []const u8, x: f32, y: f32, color: [4]f32) !void {
-        self.commands[self.command_count] = .{ .position = .{ x, y }, .text = value, .color = color };
-        self.command_count += 1;
+        try self.commands.append(.{
+            .position = .{ x, y },
+            .text = try self.allocator.dupe(u8, value),
+            .color = color,
+        });
     }
 
     pub fn draw(
@@ -186,8 +186,8 @@ pub const Printer = struct {
         const screen_height: f32 = @floatFromInt(self.gctx.swapchain_descriptor.height);
 
         var glyph_count: u32 = 0;
-        for (0..self.command_count) |i| {
-            glyph_count += @intCast(self.commands[i].text.len);
+        for (self.commands.items) |cmd| {
+            glyph_count += @intCast(cmd.text.len);
         }
 
         // TODO: store previous buffer and detect if it is still valid and only render if not.
@@ -201,8 +201,8 @@ pub const Printer = struct {
         defer self.allocator.free(vertex_data);
 
         var i: u32 = 0;
-        for (0..self.command_count) |c| {
-            const value = self.commands[c];
+        for (self.commands.items) |cmd| {
+            const value = cmd;
             const glyphs = try font.shape(
                 self.allocator,
                 self.font_library.fonts,
@@ -217,8 +217,8 @@ pub const Printer = struct {
                 const s_x: f32 = @floatFromInt(info.glyph.width);
                 const s_y: f32 = @floatFromInt(info.glyph.height);
 
-                const x = (value.position[0] + @as(f32, @floatFromInt(info.x))) / screen_width * 2 - 1;
-                const y = -((value.position[1] + @as(f32, @floatFromInt(info.y))) / screen_height * 2 - 1);
+                const x = (value.position[0] * @as(f32, @floatFromInt(self.dpr)) + @as(f32, @floatFromInt(info.x))) / screen_width * 2 - 1;
+                const y = -((value.position[1] * @as(f32, @floatFromInt(self.dpr)) + @as(f32, @floatFromInt(info.y))) / screen_height * 2 - 1);
                 const w: f32 = s_x / screen_width * 2;
                 const h: f32 = s_y / screen_height * 2;
 
@@ -322,12 +322,14 @@ pub const Printer = struct {
         pass.setBindGroup(0, bind_group, &.{});
         pass.draw(glyph_count * 6, 1, 0, 0);
 
-        @memset(self.commands, .{ .position = .{ 0, 0 }, .text = "", .color = .{ 1, 1, 1, 1 } });
-        self.command_count = 0;
+        for (self.commands.items) |cmd| {
+            self.allocator.free(cmd.text);
+        }
+        self.commands.clearRetainingCapacity();
     }
 
     pub fn deinit(self: *Printer) void {
-        self.allocator.free(self.commands);
+        self.commands.deinit();
         self.gctx.releaseResource(self.bind_group);
         self.gctx.releaseResource(self.pipeline);
         self.gctx.releaseResource(self.depth_texture);
