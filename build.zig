@@ -50,12 +50,6 @@ pub fn build(b: *std.Build) void {
         zonk_mod.linkLibrary(harfbuzz_lib);
     }
 
-    // stb_rect_pack
-    {
-        const stb_rect_pack = b.dependency("stb_rect_pack", .{ .target = target, .optimize = optimize });
-        zonk_mod.addImport("stb_rect_pack", stb_rect_pack.module("stb_rect_pack"));
-    }
-
     // freetype
     {
         const freetype = b.dependency("freetype", .{

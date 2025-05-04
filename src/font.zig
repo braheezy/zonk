@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const zgpu = @import("zgpu");
 const hb = @import("harfbuzz");
 const ft = @import("freetype");
-const stb_rect_pack = @import("stb_rect_pack");
+const stb_rect_pack = @import("stb_rect_pack.zig");
 
 /// Margin around each glyph in the atlas.
 const MARGIN_PX = 1;
@@ -430,7 +430,7 @@ pub fn segment(allocator: Allocator, value: []const u8) ![]u32 {
 
 /// Wrapper for calling stb_rect_pack.
 fn packAtlas(allocator: Allocator, sizes: [][2]i32, size: comptime_int) ![][2]i32 {
-    const rectangles = try allocator.alloc(stb_rect_pack.c.stbrp_rect, sizes.len);
+    const rectangles = try allocator.alloc(stb_rect_pack.stbrp_rect, sizes.len);
     defer allocator.free(rectangles);
 
     for (sizes, 0..) |s, i| {
@@ -444,12 +444,12 @@ fn packAtlas(allocator: Allocator, sizes: [][2]i32, size: comptime_int) ![][2]i3
         };
     }
 
-    const nodes = try allocator.alloc(stb_rect_pack.c.stbrp_node, size * 2);
+    const nodes = try allocator.alloc(stb_rect_pack.stbrp_node, size * 2);
     defer allocator.free(nodes);
 
-    var context: stb_rect_pack.c.stbrp_context = .{};
-    stb_rect_pack.c.stbrp_init_target(@ptrCast(&context), size, size, nodes.ptr, @intCast(nodes.len));
-    const result = stb_rect_pack.c.stbrp_pack_rects(@ptrCast(&context), rectangles.ptr, @intCast(rectangles.len));
+    var context: stb_rect_pack.stbrp_context = .{};
+    stb_rect_pack.stbrp_init_target(@ptrCast(&context), size, size, nodes.ptr, @intCast(nodes.len));
+    const result = stb_rect_pack.stbrp_pack_rects(@ptrCast(&context), rectangles.ptr, @intCast(rectangles.len));
 
     if (result == 0) {
         return error.FailedToPackAtlas;

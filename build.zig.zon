@@ -39,7 +39,6 @@
             // .hash = "zpix-0.2.0-Og3bwGoiCgCEJ5CX8AzpQWZooSJx6VcyOkxao0INNvT_",
             .path = "zpix",
         },
-        .stb_rect_pack = .{ .path = "pkg/stb_rect_pack" },
         .harfbuzz = .{ .path = "pkg/harfbuzz" },
         .freetype = .{ .path = "pkg/freetype" },
         // Pre-compiled WebGPU libraries for different platforms
