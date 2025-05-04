@@ -126,3 +126,13 @@ The Pong example in `examples/pong` demonstrates core Zonk concepts including:
 - Rendering and text display
 
 Run it with `zig build pong`.
+
+## Attribution
+
+The text rendering comes from [`zig-text-rendering`](https://github.com/tchayen/zig-text-rendering), thank you for your work **tchayen**!
+
+The contents of `pkg/` are from Ghostty because they are the most mature project that maintains these packages for the latest Zig. They say this about the `pkg` directory:
+
+> If you want to use them, you can copy and paste them into your project.
+
+Very generous of the Ghostty team, thank you!
