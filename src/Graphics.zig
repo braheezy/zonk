@@ -145,12 +145,12 @@ pub fn init(
     });
 
     // Create render pipeline
-    const shader_module = try ResourceManager.loadShaderModule(
+    const screen_shader_module = try ResourceManager.loadShaderModule(
         allocator,
         "src/shaders/2d.wgsl",
         gfx.device,
     );
-    defer shader_module.release();
+    defer screen_shader_module.release();
 
     const color_targets = [_]zgpu.wgpu.ColorTargetState{.{
         .format = .bgra8_unorm,
@@ -194,7 +194,7 @@ pub fn init(
 
     const pipeline_desc = zgpu.wgpu.RenderPipelineDescriptor{
         .vertex = .{
-            .module = shader_module,
+            .module = screen_shader_module,
             .entry_point = "vs_main",
             .buffer_count = 1,
             .buffers = &[_]zgpu.wgpu.VertexBufferLayout{vertex_buffer_layout},
@@ -205,7 +205,7 @@ pub fn init(
             .cull_mode = .none,
         },
         .fragment = &zgpu.wgpu.FragmentState{
-            .module = shader_module,
+            .module = screen_shader_module,
             .entry_point = "fs_main",
             .target_count = color_targets.len,
             .targets = &color_targets,

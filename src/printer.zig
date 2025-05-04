@@ -201,7 +201,7 @@ pub const Printer = struct {
                 self.allocator,
                 self.font_library.fonts,
                 value.text,
-                300, //std.math.maxInt(i32),
+                300,
             );
             defer self.allocator.free(glyphs);
 
