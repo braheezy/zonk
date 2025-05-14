@@ -68,6 +68,7 @@ pub fn build(b: *std.Build) void {
     }
 
     buildPong(b, target, optimize, zonk_mod, zpix);
+    buildAnimation(b, target, optimize, zonk_mod, zpix);
 }
 
 fn buildPong(
@@ -100,4 +101,32 @@ fn buildPong(
     pong_mod.addImport("image", image_mod);
     pong_mod.addImport("color", color_mod);
     pong_mod.addImport("zpix", zpix_mod);
+}
+
+fn buildAnimation(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    zonk_mod: *std.Build.Module,
+    zpix: *std.Build.Dependency,
+) void {
+    const zpix_mod = zpix.module("zpix");
+
+    const animation_mod = b.createModule(.{
+        .root_source_file = b.path("examples/animation/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    animation_mod.addImport("zonk", zonk_mod);
+    animation_mod.addImport("zpix", zpix_mod);
+
+    const animation_exe = b.addExecutable(.{
+        .root_module = animation_mod,
+        .name = "animation",
+    });
+    @import("zgpu").addLibraryPathsTo(animation_exe);
+    b.installArtifact(animation_exe);
+    const run_animation = b.addRunArtifact(animation_exe);
+    const run_animation_step = b.step("animation", "Run the animation example");
+    run_animation_step.dependOn(&run_animation.step);
 }
