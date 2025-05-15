@@ -4,6 +4,8 @@ const obj = @import("obj");
 const jpeg = @import("jpeg");
 const png = @import("png");
 const zmath = @import("zmath");
+const img_module = @import("image");
+const Image = @import("Image.zig").Image;
 
 const ResourceManager = @This();
 
@@ -456,4 +458,29 @@ pub fn computeTbnWithNormal(corners: [3]VertexAttr, expected_normal: [3]f32) zma
             0.0,  0.0,  0.0,  1.0,
         },
     );
+}
+
+/// Load an image from a file and return it as a Zonk Image
+pub fn loadImage(
+    allocator: std.mem.Allocator,
+    _: *zgpu.GraphicsContext,
+    path: []const u8,
+) !*Image {
+    const ext = std.fs.path.extension(path);
+    const loaded_image =
+        if (std.mem.eql(u8, ext, ".jpg") or std.mem.eql(u8, ext, ".jpeg"))
+            try jpeg.load(allocator, path)
+        else
+            try png.load(allocator, path);
+
+    // Create our new Image
+    const img = try allocator.create(Image);
+
+    // Initialize Image with the RGBAImage from the loaded image
+    img.* = .{
+        .rgba_image = loaded_image,
+        .allocator = allocator,
+    };
+
+    return img;
 }

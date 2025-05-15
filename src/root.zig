@@ -3,6 +3,7 @@ pub const zglfw = @import("zglfw");
 
 pub const Game = @import("Game.zig");
 pub const InputState = @import("input_state.zig");
+pub const Image = @import("Image.zig").Image;
 
 const App = @import("App.zig");
 
