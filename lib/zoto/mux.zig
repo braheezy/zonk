@@ -45,6 +45,7 @@ pub const Mux = struct {
             .previous_volume = 1.0,
             .volume = 1.0,
             .buffer = std.ArrayList(u8).init(self.allocator),
+            .buffer_size = self.defaultBufferSize(),
         };
     }
 
@@ -149,16 +150,82 @@ pub const Player = struct {
     previous_volume: f64,
     volume: f64,
     state: PlayerState,
+    buffer_pool: ?Pool = null,
     buffer: std.ArrayList(u8),
     eof: bool,
     buffer_size: usize,
-    buf_pool: ?Pool = null,
+    mutex: std.Thread.Mutex = .{},
 
     pub fn play(self: *Player) void {
         // Start a new thread to run playImpl
         const thread = try std.Thread.spawn(.{}, Player.playThread, self);
         thread.detach();
     }
+
+    pub fn pause(self: *Player) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (self.state != .play) {
+            return;
+        }
+        self.state = .pause;
+    }
+
+    pub fn setBufferSize(self: *Player, buffer_size: usize) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const original_size = self.buffer_size;
+        self.buffer_size = buffer_size;
+        if (buffer_size == 0) {
+            self.buffer_size = self.mux.defaultBufferSize();
+        }
+        if (original_size != self.buffer_size) {
+            if (self.buffer_pool) |p| p.deinit();
+            self.buffer_pool = null;
+        }
+    }
+
+    pub fn reset(self: *Player) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.resetImpl();
+    }
+
+    pub fn isPlaying(self: *Player) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.state == .play;
+    }
+
+    pub fn getVolume(self: *Player) f64 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.volume;
+    }
+
+    pub fn setVolume(self: *Player, volume: f64) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.volume = volume;
+        if (self.state != .play) {
+            self.previous_volume = volume;
+        }
+    }
+
+    pub fn bufferedSize(self: *Player) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.buffer.len;
+    }
+
+    pub fn close(self: *Player) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        try self.closeImpl();
+    }
+
     fn playThread(ctx: *anyopaque) !void {
         var self: *Player = @ptrCast(ctx);
         self.mutex.lock();
@@ -174,7 +241,11 @@ pub const Player = struct {
         self.state = .play;
         if (!self.eof) {
             const buf = self.getTempBuffer();
-            defer buf.deinit();
+            defer {
+                if (self.buffer_pool) |p| {
+                    p.release(buf);
+                }
+            }
             while (self.buffer.len < self.buffer_size) {
                 const bytes_read = try self.read(buf.buf);
                 self.buffer.appendSlice(buf.buf[0..bytes_read]);
@@ -188,6 +259,37 @@ pub const Player = struct {
             self.state = .paused;
         }
         self.addToPlayers();
+    }
+
+    fn resetImpl(self: *Player) void {
+        if (self.state == .closed) {
+            return;
+        }
+        self.state = .paused;
+        self.buffer.clearAndFree();
+        self.eof = false;
+    }
+
+    fn closeImpl(self: *Player) !void {
+        self.removeFromPlayers();
+
+        if (self.state == .closed) {
+            return error.PlayerAlreadyClosed;
+        }
+        self.state = .closed;
+        self.buffer.clearAndFree();
+    }
+
+    fn addToPlayers(self: *Player) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.mux.addPlayer(self);
+    }
+
+    fn removeFromPlayers(self: *Player) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.mux.removePlayer(self);
     }
 
     fn read(self: *Player, buf: []u8) !usize {
@@ -275,13 +377,29 @@ pub const Player = struct {
         if (self.buffer.len >= self.buffer_size) {
             return 0;
         }
+
+        const buf = self.getTempBuffer();
+        defer {
+            if (self.buffer_pool) |p| {
+                p.release(buf);
+            }
+        }
+        const n = try self.read(buf.buf);
+        self.buffer.appendSlice(buf.buf[0..n]);
+        if (n == 0) {
+            self.eof = true;
+            if (self.buffer.len == 0) {
+                self.state = .paused;
+            }
+        }
+        return n;
     }
 
     fn getTempBuffer(self: *Player) *Buffer {
-        if (self.buf_pool == null) {
-            self.buf_pool = try Pool.init(self.mux.allocator, self.buffer_size);
+        if (self.buffer_pool == null) {
+            self.buffer_pool = try Pool.init(self.mux.allocator, self.buffer_size);
         }
-        const buffer = try self.buf_pool.?.acquire();
+        const buffer = try self.buffer_pool.?.acquire();
         return buffer;
     }
 };
