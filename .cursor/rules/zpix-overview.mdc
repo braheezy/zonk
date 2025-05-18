@@ -1,0 +1,44 @@
+---
+description: zpix library
+globs:
+alwaysApply: false
+---
+
+## Overview
+
+- **zpix** is a pure Zig image decoding library, primarily a port of the Go standard library's `color`, `image`, `jpeg`, and `png` packages.
+- The codebase closely follows Go's logic, but uses Zig idioms (notably tagged unions instead of interfaces).
+- The main entry point is `src/root.zig`, which exposes the four major modules: `color`, `image`, `jpeg`, and `png`.
+
+## Directory Structure
+
+- `src/color/`: Color models and conversions. Implements types like `Gray`, `Gray16`, `RGB`, `RGBA`, `NRGBA`, `YCbCr`, `CMYK`, and the `Color` union. Provides color conversion and palette logic. Ported from Go's `color` package.
+- `src/image/`: Image abstractions and utilities. Defines the `Image` union (for all supported image types), `Config`, and geometric types (`Point`, `Rectangle`). Includes helpers for drawing, pixel access, and color model conversions. Ported from Go's `image` package.
+- `src/jpeg/`: JPEG decoder. Implements baseline and progressive JPEG decoding, Huffman tables, IDCT, and color conversion. Main entry is `decode` and `load` in `root.zig`. Ported from Go's `image/jpeg` package.
+- `src/png/`: PNG decoder. Handles all PNG color types, bit depths, and interlacing (Adam7). Main entry is `decode` and `load` in `root.zig`. Also includes an SNG (portable PNG text format) utility for testing. Ported from Go's `image/png` package.
+- `src/testdata/`: Test images and SNG files for validation (mirrors Go's testdata structure).
+
+## Key Concepts
+
+- **Tagged Unions**: Instead of Go's interfaces, Zig uses tagged unions for `Color` and `Image` types, allowing efficient and type-safe dispatch.
+- **Memory Management**: All image allocations are explicit; callers must free image data using the provided `free` methods.
+- **API**: The main API for decoding is `jpeg.load`, `png.load`, or `png.loadFromBuffer`, which return an `image.Image` union. Color and pixel access is via the `image.Image` and `color.Color` unions.
+- **Drawing**: The `image/draw.zig` module provides basic drawing primitives for RGBA images.
+- **Testing**: PNG decoding is validated against SNG files using the `sng` utility and testdata.
+
+## Usage Example
+
+- Import the desired module from `zpix` in your Zig project:
+  - `@import("zpix").jpeg` for JPEG
+  - `@import("zpix").png` for PNG
+  - `@import("zpix").image` for image abstractions
+  - `@import("zpix").color` for color models
+- Decode an image using `jpeg.load(allocator, path)` or `png.load(allocator, path)`.
+- Work with the returned `image.Image` union for pixel access and manipulation.
+
+## Design Notes
+
+- The codebase is intentionally close to Go's stdlib for maintainability and correctness.
+- Some helpers (e.g., `idct.zig`, `HuffTable.zig`, `draw.zig`, `util.zig`, `geometry.zig`) are direct ports or adaptations of Go's internal helpers.
+- The PNG and JPEG decoders are self-contained and do not depend on external C libraries.
+- The library is suitable for embedding in Zig projects that need image decoding without C dependencies.

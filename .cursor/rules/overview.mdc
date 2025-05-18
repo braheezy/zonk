@@ -1,0 +1,8 @@
+---
+description: Project Overview
+globs:
+alwaysApply: false
+---
+Zonk is a Zig 2d engine based on webgpu. It's modeled after ebitenengine from Go.
+
+It has a dependency on zpix, a zig library port of the color, image, and png from go standard lib.

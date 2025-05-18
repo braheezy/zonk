@@ -69,6 +69,26 @@ pub fn build(b: *std.Build) void {
 
     buildPong(b, target, optimize, zonk_mod, zpix);
     buildAnimation(b, target, optimize, zonk_mod, zpix);
+
+    const qoa_mod = b.createModule(.{
+        .root_source_file = b.path("lib/qoa/qoa.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const qoaplay_mod = b.createModule(.{
+        .root_source_file = b.path("examples/qoaplay/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    qoaplay_mod.addImport("qoa", qoa_mod);
+    const qoaplay_exe = b.addExecutable(.{
+        .root_module = qoaplay_mod,
+        .name = "qoaplay",
+    });
+    b.installArtifact(qoaplay_exe);
+    const run_qoaplay = b.addRunArtifact(qoaplay_exe);
+    const run_qoaplay_step = b.step("qoaplay", "Run the qoaplay example");
+    run_qoaplay_step.dependOn(&run_qoaplay.step);
 }
 
 fn buildPong(
