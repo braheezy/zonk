@@ -1,4 +1,6 @@
 const std = @import("std");
+const Pool = @import("pool.zig").Pool;
+const Buffer = @import("buffer.zig").Buffer;
 
 pub const Format = enum {
     float_32_le,
@@ -18,15 +20,17 @@ pub const Mux = struct {
     sample_rate: u32,
     channel_count: u8,
     format: Format,
+    players: std.ArrayList(*Player),
+    allocator: std.mem.Allocator,
     mutex: std.Thread.Mutex = .{},
     condition: std.Thread.Condition = .{},
-    players: std.ArrayList(*Player),
 
     pub fn init(allocator: std.mem.Allocator, sample_rate: u32, channel_count: u8, format: Format) Mux {
         const self = Mux{
             .sample_rate = sample_rate,
             .channel_count = channel_count,
             .format = format,
+            .allocator = allocator,
             .players = std.ArrayList(*Player).init(allocator),
         };
         const thread = try std.Thread.spawn(.{}, muxLoop, self);
@@ -40,6 +44,7 @@ pub const Mux = struct {
             .src = src,
             .previous_volume = 1.0,
             .volume = 1.0,
+            .buffer = std.ArrayList(u8).init(self.allocator),
         };
     }
 
@@ -85,7 +90,6 @@ pub const Mux = struct {
     }
 
     fn wait(self: *Mux) void {
-        // Acquire the mutex
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -98,19 +102,38 @@ pub const Mux = struct {
     }
 
     fn shouldWait(self: *Mux) bool {
-        _ = self;
-        return false;
+        for (self.players.items) |player| {
+            if (player.canReadSourceToBuffer()) {
+                return false;
+            }
+        }
+        return true;
     }
 };
 
-fn muxLoop(self: *Mux) void {
+fn muxLoop(self: *Mux) !void {
+    var players = std.ArrayList(*Player).init(self.allocator);
     while (true) {
         self.wait();
 
         self.mutex.lock();
-        // TODO: bunch of players stuff
+        players.clearAndFree();
+        players = try self.players.clone();
         self.mutex.unlock();
-        // TODO: all zero check
+
+        var all_zero = true;
+        for (players.items) |player| {
+            const n = player.readSourceToBuffer();
+            if (n != 0) {
+                all_zero = false;
+            }
+        }
+
+        // Sleeping is necessary especially on browsers.
+        // Sometimes a player continues to read 0 bytes from the source and this loop can be a busy loop in such case.
+        if (all_zero) {
+            std.time.sleep(std.time.ns_per_ms);
+        }
     }
 }
 
@@ -126,32 +149,51 @@ pub const Player = struct {
     previous_volume: f64,
     volume: f64,
     state: PlayerState,
-    buffer: []u8,
+    buffer: std.ArrayList(u8),
     eof: bool,
     buffer_size: usize,
-    mutex: std.Thread.Mutex = .{},
+    buf_pool: ?Pool = null,
 
     pub fn play(self: *Player) void {
         // Start a new thread to run playImpl
         const thread = try std.Thread.spawn(.{}, Player.playThread, self);
         thread.detach();
     }
-    fn playThread(ctx: *anyopaque) void {
+    fn playThread(ctx: *anyopaque) !void {
         var self: *Player = @ptrCast(ctx);
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        self.playImpl();
+        try self.playImpl();
     }
 
-    fn playImpl(self: *Player) void {
+    fn playImpl(self: *Player) !void {
         if (self.state != .paused) {
             return;
         }
         self.state = .play;
         if (!self.eof) {
-            const
+            const buf = self.getTempBuffer();
+            defer buf.deinit();
+            while (self.buffer.len < self.buffer_size) {
+                const bytes_read = try self.read(buf.buf);
+                self.buffer.appendSlice(buf.buf[0..bytes_read]);
+                if (bytes_read == 0) {
+                    self.eof = true;
+                    break;
+                }
+            }
         }
+        if (self.eof and self.buffer.len == 0) {
+            self.state = .paused;
+        }
+        self.addToPlayers();
+    }
+
+    fn read(self: *Player, buf: []u8) !usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.src.read(buf);
     }
 
     fn canReadSourceToBuffer(self: *Player) bool {
@@ -220,5 +262,26 @@ pub const Player = struct {
         }
 
         return n;
+    }
+
+    fn readSourceToBuffer(self: *Player) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (self.state == .closed) {
+            return 0;
+        }
+
+        if (self.buffer.len >= self.buffer_size) {
+            return 0;
+        }
+    }
+
+    fn getTempBuffer(self: *Player) *Buffer {
+        if (self.buf_pool == null) {
+            self.buf_pool = try Pool.init(self.mux.allocator, self.buffer_size);
+        }
+        const buffer = try self.buf_pool.?.acquire();
+        return buffer;
     }
 };
