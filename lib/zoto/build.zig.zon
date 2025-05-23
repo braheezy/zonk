@@ -1,0 +1,21 @@
+.{
+    .name = .zoto,
+
+    .version = "0.0.0",
+    .fingerprint = 0xf013d3c28c031d12,
+
+    .minimum_zig_version = "0.14.0",
+
+    .dependencies = .{
+        .zig_objc = .{
+            .url = "git+https://github.com/mitchellh/zig-objc#3ab0d37c7d6b933d6ded1b3a35b6b60f05590a98",
+            .hash = "zig_objc-0.0.0-Ir_Sp3TyAADEVRTxXlScq3t_uKAM91MYNerZkHfbD0yt",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
