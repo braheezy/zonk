@@ -1,7 +1,9 @@
 const objc = @import("objc");
 const std = @import("std");
-const Mux = @import("mux.zig").Mux;
-const Format = @import("mux.zig").Format;
+const mux = @import("mux.zig");
+const Mux = mux.Mux;
+const Format = mux.Format;
+const Player = mux.Player;
 
 const av_audio_session_error_code_cannot_start_playing = 0x21706c61; // '!pla'
 const av_audio_session_error_code_cannot_interrupt_others = 0x21696e74; // '!int'
@@ -21,7 +23,7 @@ pub const AudioStreamBasicDescription = extern struct {
     bytes_per_frame: u32,
     channels_per_frame: u32,
     bits_per_channel: u32,
-    reserved: u32,
+    reserved: u32 = 0,
 };
 
 pub const AudioQueueRef = usize;
@@ -87,7 +89,7 @@ extern "c" fn AudioQueuePause(
 
 fn newAudioQueue(sample_rate: u32, channel_count: u32, one_buffer_size_in_bytes: u32) !struct { AudioQueueRef, []AudioQueueBufferRef } {
     const description = AudioStreamBasicDescription{
-        .sample_rate = @intCast(sample_rate),
+        .sample_rate = @floatFromInt(sample_rate),
         .format_id = audio_format_linear_pcm,
         .format_flags = audio_format_flag_is_float,
         .bytes_per_packet = channel_count * float32_size_in_bytes,
@@ -127,10 +129,10 @@ fn newAudioQueue(sample_rate: u32, channel_count: u32, one_buffer_size_in_bytes:
         bufs[i] = buf;
     }
 
-    return .{ audio_queue, bufs };
+    return .{ audio_queue, &bufs };
 }
 
-const Context = struct {
+pub const Context = struct {
     audio_queue: AudioQueueRef,
     unqueued_buffers: std.ArrayList(AudioQueueBufferRef),
     one_buffer_size_in_bytes: u32,
@@ -141,6 +143,52 @@ const Context = struct {
     mux: *Mux,
     ready: bool,
     allocator: std.mem.Allocator,
+    err: ?anyerror = null,
+
+    pub fn init(allocator: std.mem.Allocator, sample_rate: u32, channel_count: u32, format: Format, buffer_size_in_bytes: u32) !*Context {
+        // defaultOneBufferSizeInBytes is the default buffer size in bytes.
+        //
+        // 12288 seems necessary at least on iPod touch (7th) and MacBook Pro 2020.
+        // With 48000[Hz] stereo, the maximum delay is (12288*4[buffers] / 4 / 2)[samples] / 48000 [Hz] = 100[ms].
+        // '4' is float32 size in bytes. '2' is a number of channels for stereo
+        const default_one_buffer_size_in_bytes = 12288;
+
+        var one_buffer_size_in_bytes: u32 = 0;
+        if (buffer_size_in_bytes != 0) {
+            one_buffer_size_in_bytes = buffer_size_in_bytes / buffer_count;
+        } else {
+            one_buffer_size_in_bytes = default_one_buffer_size_in_bytes;
+        }
+        const bytes_per_sample = channel_count * float32_size_in_bytes;
+        one_buffer_size_in_bytes = one_buffer_size_in_bytes / bytes_per_sample * bytes_per_sample;
+
+        const c = try allocator.create(Context);
+        c.* = Context{
+            .audio_queue = undefined,
+            .unqueued_buffers = std.ArrayList(AudioQueueBufferRef).init(allocator),
+            .mutex = .{},
+            .condition = .{},
+            .to_pause = false,
+            .to_resume = false,
+            .one_buffer_size_in_bytes = one_buffer_size_in_bytes,
+            .mux = try Mux.init(
+                allocator,
+                sample_rate,
+                @intCast(channel_count),
+                format,
+            ),
+            .ready = false,
+            .allocator = allocator,
+        };
+
+        context = c;
+
+        // Spawn the audio worker thread
+        const thread = try std.Thread.spawn(.{}, audioContextWorker, .{ c, sample_rate, channel_count });
+        thread.detach();
+
+        return c;
+    }
 
     pub fn waitForReady(self: *Context) void {
         self.mutex.lock();
@@ -151,12 +199,148 @@ const Context = struct {
         }
     }
 
-    fn suspendPlay(self: *Context) void {
+    pub fn pause(self: *Context) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        // TODO: Add error checking when error handling is implemented
-        // if (self.err != null) return self.err;
+        if (self.err) |err| return err;
+
+        self.to_pause = true;
+        self.to_resume = false;
+        self.condition.signal();
+    }
+
+    pub fn play(self: *Context) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (self.err) |err| return err;
+
+        self.to_pause = false;
+        self.to_resume = true;
+        self.condition.signal();
+    }
+
+    pub fn getErr(self: *Context) ?anyerror {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.err;
+    }
+
+    pub fn newPlayer(self: *Context, reader: std.io.AnyReader) !*Player {
+        return try self.mux.newPlayer(reader);
+    }
+
+    fn wait(self: *Context) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        while (self.unqueued_buffers.items.len == 0 and self.err == null and !self.to_pause and !self.to_resume) {
+            self.condition.wait(&self.mutex);
+        }
+        return self.err == null;
+    }
+
+    fn loop(self: *Context) void {
+        const buf32 = self.allocator.alloc(f32, self.one_buffer_size_in_bytes / 4) catch |loop_err| {
+            self.mutex.lock();
+            if (self.err == null) self.err = loop_err;
+            self.mutex.unlock();
+            return;
+        };
+        defer self.allocator.free(buf32);
+
+        while (true) {
+            if (!self.wait()) {
+                return;
+            }
+            self.appendBuffer(buf32);
+        }
+    }
+
+    fn appendBuffer(self: *Context, buf32: []f32) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (self.err != null) {
+            return;
+        }
+
+        if (self.to_pause) {
+            self.pauseImpl() catch |pause_err| {
+                if (self.err == null) self.err = pause_err;
+            };
+            self.to_pause = false;
+            return;
+        }
+
+        if (self.to_resume) {
+            self.resumeImpl() catch |resume_err| {
+                if (self.err == null) self.err = resume_err;
+            };
+            self.to_resume = false;
+            return;
+        }
+
+        if (self.unqueued_buffers.items.len == 0) return;
+
+        const buf = self.unqueued_buffers.orderedRemove(0);
+
+        // Read audio data from mux
+        _ = self.mux.readFloat32s(buf32) catch |read_err| {
+            if (self.err == null) self.err = read_err;
+            return;
+        };
+
+        // Copy float32 data to audio buffer
+        const audio_data_ptr: [*]f32 = @ptrFromInt(buf.audio_data);
+        const audio_data_slice = audio_data_ptr[0 .. buf.audio_data_byte_size / float32_size_in_bytes];
+        @memcpy(audio_data_slice, buf32[0..@min(buf32.len, audio_data_slice.len)]);
+
+        const osstatus = AudioQueueEnqueueBuffer(self.audio_queue, buf, 0, null);
+        if (osstatus != no_err) {
+            if (self.err == null) self.err = error.AudioQueueEnqueueBufferFailed;
+        }
+    }
+
+    fn pauseImpl(self: *Context) !void {
+        const osstatus = AudioQueuePause(self.audio_queue);
+        if (osstatus != no_err) {
+            return error.AudioQueuePauseFailed;
+        }
+    }
+
+    fn resumeImpl(self: *Context) !void {
+        var retry_count: i32 = 0;
+        while (true) {
+            const osstatus = AudioQueueStart(self.audio_queue, null);
+            if (osstatus == no_err) {
+                break;
+            }
+
+            if ((osstatus == av_audio_session_error_code_cannot_start_playing or
+                osstatus == av_audio_session_error_code_cannot_interrupt_others) and
+                retry_count < 30)
+            {
+                // Use exponential backoff for temporary errors
+                std.time.sleep(sleepTime(retry_count));
+                retry_count += 1;
+                continue;
+            }
+
+            if (osstatus == av_audio_session_error_code_siri_is_recording) {
+                // Siri recording error should be temporary
+                std.time.sleep(10 * std.time.ns_per_ms);
+                continue;
+            }
+
+            return error.AudioQueueStartFailed;
+        }
+    }
+
+    fn suspendPlay(self: *Context) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
 
         self.to_pause = true;
         self.to_resume = false;
@@ -167,9 +351,6 @@ const Context = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        // TODO: Add error checking when error handling is implemented
-        // if (self.err != null) return self.err;
-
         self.to_pause = false;
         self.to_resume = true;
         self.condition.signal();
@@ -177,46 +358,6 @@ const Context = struct {
 };
 
 var context: *Context = undefined;
-
-fn newContext(allocator: std.mem.Allocator, sample_rate: u32, channel_count: u32, format: Format, buffer_size_in_bytes: u32) !*Context {
-    // defaultOneBufferSizeInBytes is the default buffer size in bytes.
-    //
-    // 12288 seems necessary at least on iPod touch (7th) and MacBook Pro 2020.
-    // With 48000[Hz] stereo, the maximum delay is (12288*4[buffers] / 4 / 2)[samples] / 48000 [Hz] = 100[ms].
-    // '4' is float32 size in bytes. '2' is a number of channels for stereo
-    const default_one_buffer_size_in_bytes = 12288;
-
-    var one_buffer_size_in_bytes: u32 = 0;
-    if (buffer_size_in_bytes != 0) {
-        one_buffer_size_in_bytes = buffer_size_in_bytes / buffer_count;
-    } else {
-        one_buffer_size_in_bytes = default_one_buffer_size_in_bytes;
-    }
-    const bytes_per_sample = channel_count * float32_size_in_bytes;
-    one_buffer_size_in_bytes = one_buffer_size_in_bytes / bytes_per_sample * bytes_per_sample;
-
-    const c = try allocator.create(Context);
-    c.* = Context{
-        .audio_queue = undefined,
-        .unqueued_buffers = std.ArrayList(AudioQueueBufferRef).init(allocator),
-        .mutex = .{},
-        .condition = .{},
-        .to_pause = false,
-        .to_resume = false,
-        .one_buffer_size_in_bytes = one_buffer_size_in_bytes,
-        .mux = try Mux.init(allocator, sample_rate, channel_count, format),
-        .ready = false,
-        .allocator = allocator,
-    };
-
-    context = c;
-
-    // Spawn the audio worker thread
-    const thread = try std.Thread.spawn(.{}, audioContextWorker, .{ c, sample_rate, channel_count });
-    thread.detach();
-
-    return c;
-}
 
 fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void {
     // Equivalent of runtime.LockOSThread() - in Zig this is handled by the thread itself
@@ -233,26 +374,24 @@ fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void 
     }
 
     // Call newAudioQueue equivalent
-    const queue_result = newAudioQueue(sample_rate, channel_count, ctx.one_buffer_size_in_bytes) catch |err| {
+    const q, const bs = newAudioQueue(
+        sample_rate,
+        channel_count,
+        ctx.one_buffer_size_in_bytes,
+    ) catch |err| {
         // Store error in context (equivalent to c.err.TryStore(err))
-        std.log.err("newAudioQueue failed: {}", .{err});
+        std.log.err("newAudioQueue failed: {any}", .{err});
         return;
     };
 
-    ctx.audio_queue = queue_result[0];
-    // Convert array to ArrayList and populate it
-    for (queue_result[1]) |buf| {
-        ctx.unqueued_buffers.append(buf) catch |err| {
-            std.log.err("Failed to initialize buffer list: {}", .{err});
-            return;
-        };
-    }
+    ctx.audio_queue = q;
+    ctx.unqueued_buffers.clearAndFree();
+    ctx.unqueued_buffers.appendSlice(bs);
 
-    // Call setNotificationHandler equivalent
-    setNotificationHandler() catch |err| {
-        std.log.err("setNotificationHandler failed: {}", .{err});
-        return;
-    };
+    // setNotificationHandler() catch |err| {
+    //     std.log.err("setNotificationHandler failed: {any}", .{err});
+    //     return;
+    // };
 
     var retry_count: i32 = 0;
     while (true) {
@@ -278,8 +417,8 @@ fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void 
     ctx.mutex.unlock();
     ready_closed = true;
 
-    // Call loop equivalent (placeholder - function not ported)
-    // ctx.loop();
+    // Start the main audio processing loop
+    ctx.loop();
 }
 
 // Placeholder callback functions for sleep/wake notifications
@@ -295,40 +434,46 @@ fn setGlobalResume(self: objc.Object, _: objc.SEL, notification: objc.Object) ca
     context.resumePlay();
 }
 
-fn setNotificationHandler() !void {
-    // Get required classes
-    const NSObject = objc.getClass("NSObject") orelse return error.NSObjectNotFound;
-    const NSWorkspace = objc.getClass("NSWorkspace") orelse return error.NSWorkspaceNotFound;
-    const NSString = objc.getClass("NSString") orelse return error.NSStringNotFound;
+// fn setNotificationHandler() !void {
+//     const ZtoNotificationObserver = setup: {
+//         const My_Class = objc.allocateClassPair(objc.getClass("NSObject").?, "ZtoNotificationObserver").?;
+//         defer objc.registerClassPair(My_Class);
+//         try My_Class.addMethod("receiveSleepNote", setGlobalPause);
+//         break :setup My_Class;
+//     };
 
-    // Create notification name strings
-    const sleepNotificationName = NSString.msgSend(objc.Object, "stringWithUTF8String:", .{"NSWorkspaceWillSleepNotification"});
-    const wakeNotificationName = NSString.msgSend(objc.Object, "stringWithUTF8String:", .{"NSWorkspaceDidWakeNotification"});
+//     const NSObject = objc.getClass("NSObject") orelse return error.NSObjectNotFound;
+//     const NSWorkspace = objc.getClass("NSWorkspace") orelse return error.NSWorkspaceNotFound;
+//     const NSString = objc.getClass("NSString") orelse return error.NSStringNotFound;
 
-    // Get shared workspace and notification center
-    const sharedWorkspace = NSWorkspace.msgSend(objc.Object, "sharedWorkspace", .{});
-    const notificationCenter = sharedWorkspace.msgSend(objc.Object, "notificationCenter", .{});
+//     // Create notification name strings
+//     const sleepNotificationName = NSString.msgSend(objc.Object, "stringWithUTF8String:", .{"NSWorkspaceWillSleepNotification"});
+//     const wakeNotificationName = NSString.msgSend(objc.Object, "stringWithUTF8String:", .{"NSWorkspaceDidWakeNotification"});
 
-    // Create observer object (using NSObject as base for simplicity)
-    const observer = NSObject.msgSend(objc.Object, "alloc", .{}).msgSend(objc.Object, "init", .{});
+//     // Get shared workspace and notification center
+//     const sharedWorkspace = NSWorkspace.msgSend(objc.Object, "sharedWorkspace", .{});
+//     const notificationCenter = sharedWorkspace.msgSend(objc.Object, "notificationCenter", .{});
 
-    // Register for sleep notification
-    // Note: This is a simplified approach. Full implementation would require proper method registration
-    _ = notificationCenter.msgSend(objc.Object, "addObserver:selector:name:object:", .{
-        observer,
-        @intFromPtr(&setGlobalPause),
-        sleepNotificationName,
-        @as(objc.Object, @enumFromInt(0)),
-    });
+//     // Create observer object (using NSObject as base for simplicity)
+//     const observer = NSObject.msgSend(objc.Object, "alloc", .{}).msgSend(objc.Object, "init", .{});
 
-    // Register for wake notification
-    _ = notificationCenter.msgSend(objc.Object, "addObserver:selector:name:object:", .{
-        observer,
-        @intFromPtr(&setGlobalResume),
-        wakeNotificationName,
-        @as(objc.Object, @enumFromInt(0)),
-    });
-}
+//     // Register for sleep notification
+//     // Note: This is a simplified approach. Full implementation would require proper method registration
+//     _ = notificationCenter.msgSend(objc.Object, "addObserver:selector:name:object:", .{
+//         observer,
+//         @intFromPtr(&setGlobalPause),
+//         sleepNotificationName,
+//         @as(objc.Object, @enumFromInt(0)),
+//     });
+
+//     // Register for wake notification
+//     _ = notificationCenter.msgSend(objc.Object, "addObserver:selector:name:object:", .{
+//         observer,
+//         @intFromPtr(&setGlobalResume),
+//         wakeNotificationName,
+//         @as(objc.Object, @enumFromInt(0)),
+//     });
+// }
 
 fn render(user_data: ?*anyopaque, aq: AudioQueueRef, buffer: AudioQueueBufferRef) callconv(.C) void {
     _ = user_data;
@@ -345,4 +490,13 @@ fn render(user_data: ?*anyopaque, aq: AudioQueueRef, buffer: AudioQueueBufferRef
 
     // Signal that a buffer is available
     context.condition.signal();
+}
+
+fn sleepTime(count: i32) u64 {
+    return switch (count) {
+        0 => 10 * std.time.ns_per_ms,
+        1 => 20 * std.time.ns_per_ms,
+        2 => 50 * std.time.ns_per_ms,
+        else => 100 * std.time.ns_per_ms,
+    };
 }

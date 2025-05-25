@@ -3,6 +3,7 @@ const RGBAImage = @import("image").RGBAImage;
 const Rectangle = @import("image").Rectangle;
 const zgpu = @import("zgpu");
 const ResourceManager = @import("ResourceManager.zig");
+const Geom = @import("Geom.zig");
 
 /// Represents a 2D image in the Zonk engine
 /// Wraps the RGBAImage type from zpix
@@ -16,11 +17,7 @@ sub_bounds: ?Rectangle = null,
 
 /// Options for drawing images
 pub const DrawImageOptions = struct {
-    /// Geometric transformation
-    tx: f32 = 0,
-    ty: f32 = 0,
-    /// Color scale (r, g, b, a components from 0-1)
-    color_scale: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
+    geom: Geom,
 };
 
 /// Create a new image with the given dimensions
@@ -94,8 +91,8 @@ pub fn draw(self: *Image, dest: *RGBAImage, options: ?DrawImageOptions) void {
     const dest_center_y = @as(f32, @floatFromInt(dest_height)) / 2.0;
 
     // Apply translation
-    const x = @as(i32, @intFromFloat(dest_center_x + opts.tx - @as(f32, @floatFromInt(src_width)) / 2.0));
-    const y = @as(i32, @intFromFloat(dest_center_y + opts.ty - @as(f32, @floatFromInt(src_height)) / 2.0));
+    const x = @as(i32, @intFromFloat(dest_center_x + opts.center_offset_x - @as(f32, @floatFromInt(src_width)) / 2.0));
+    const y = @as(i32, @intFromFloat(dest_center_y + opts.center_offset_y - @as(f32, @floatFromInt(src_height)) / 2.0));
 
     // Calculate source start position
     const src_start_x = src_bounds.min.x;

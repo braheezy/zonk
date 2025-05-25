@@ -25,8 +25,8 @@ pub const Mux = struct {
     mutex: std.Thread.Mutex = .{},
     condition: std.Thread.Condition = .{},
 
-    pub fn init(allocator: std.mem.Allocator, sample_rate: u32, channel_count: u8, format: Format) Mux {
-        const self = Mux{
+    pub fn init(allocator: std.mem.Allocator, sample_rate: u32, channel_count: u8, format: Format) !*Mux {
+        var self = Mux{
             .sample_rate = sample_rate,
             .channel_count = channel_count,
             .format = format,
@@ -35,7 +35,7 @@ pub const Mux = struct {
         };
         const thread = try std.Thread.spawn(.{}, muxLoop, self);
         thread.detach();
-        return self;
+        return &self;
     }
 
     pub fn newPlayer(self: *Mux, src: std.io.AnyReader) *Player {
