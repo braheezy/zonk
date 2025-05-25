@@ -227,8 +227,8 @@ pub const Context = struct {
         return self.err;
     }
 
-    pub fn newPlayer(self: *Context, reader: std.io.AnyReader) !*Player {
-        return try self.mux.newPlayer(reader);
+    pub fn newPlayer(self: *Context, reader: std.io.AnyReader) *Player {
+        return self.mux.newPlayer(reader);
     }
 
     fn wait(self: *Context) bool {
@@ -386,7 +386,10 @@ fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void 
 
     ctx.audio_queue = q;
     ctx.unqueued_buffers.clearAndFree();
-    ctx.unqueued_buffers.appendSlice(bs);
+    ctx.unqueued_buffers.appendSlice(bs) catch |err| {
+        std.log.err("Failed to append buffers in audioContextWorker: {any}", .{err});
+        return;
+    };
 
     // setNotificationHandler() catch |err| {
     //     std.log.err("setNotificationHandler failed: {any}", .{err});

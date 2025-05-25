@@ -3,13 +3,13 @@ const Pool = @import("pool.zig").Pool;
 const Buffer = @import("buffer.zig").Buffer;
 
 pub const Format = enum {
-    float_32_le,
+    float32_le,
     uint8,
     int16_le,
 
     pub fn byteLength(self: Format) usize {
         return switch (self) {
-            .float_32_le => 4,
+            .float32_le => 4,
             .uint8 => 1,
             .int16_le => 2,
         };
@@ -26,20 +26,21 @@ pub const Mux = struct {
     condition: std.Thread.Condition = .{},
 
     pub fn init(allocator: std.mem.Allocator, sample_rate: u32, channel_count: u8, format: Format) !*Mux {
-        var self = Mux{
+        const self = try allocator.create(Mux);
+        self.* = Mux{
             .sample_rate = sample_rate,
             .channel_count = channel_count,
             .format = format,
             .allocator = allocator,
             .players = std.ArrayList(*Player).init(allocator),
         };
-        const thread = try std.Thread.spawn(.{}, muxLoop, self);
+        const thread = try std.Thread.spawn(.{}, muxLoop, .{self});
         thread.detach();
-        return &self;
+        return self;
     }
 
     pub fn newPlayer(self: *Mux, src: std.io.AnyReader) *Player {
-        return &Player{
+        var player = Player{
             .mux = self,
             .src = src,
             .previous_volume = 1.0,
@@ -47,17 +48,18 @@ pub const Mux = struct {
             .buffer = std.ArrayList(u8).init(self.allocator),
             .buffer_size = self.defaultBufferSize(),
         };
+        return &player;
     }
 
-    pub fn addPlayer(self: *Mux, player: Player) void {
+    pub fn addPlayer(self: *Mux, player: *Player) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        self.players.append(player);
+        try self.players.append(player);
         self.condition.signal();
     }
 
-    pub fn readFloat32s(self: *Mux, dst: []f32) !usize {
+    pub fn readFloat32s(self: *Mux, dst: []f32) !void {
         self.mutex.lock();
 
         const players = try self.players.clone();
@@ -65,8 +67,8 @@ pub const Mux = struct {
 
         @memset(dst, 0);
 
-        for (players) |player| {
-            player.readBufferAndAdd(dst);
+        for (players.items) |player| {
+            _ = player.readBufferAndAdd(dst);
         }
         self.condition.signal();
     }
@@ -124,7 +126,7 @@ fn muxLoop(self: *Mux) !void {
 
         var all_zero = true;
         for (players.items) |player| {
-            const n = player.readSourceToBuffer();
+            const n = try player.readSourceToBuffer();
             if (n != 0) {
                 all_zero = false;
             }
@@ -149,16 +151,16 @@ pub const Player = struct {
     src: std.io.AnyReader,
     previous_volume: f64,
     volume: f64,
-    state: PlayerState,
+    state: PlayerState = .paused,
     buffer_pool: ?Pool = null,
     buffer: std.ArrayList(u8),
-    eof: bool,
+    eof: bool = false,
     buffer_size: usize,
     mutex: std.Thread.Mutex = .{},
 
-    pub fn play(self: *Player) void {
+    pub fn play(self: *Player) !void {
         // Start a new thread to run playImpl
-        const thread = try std.Thread.spawn(.{}, Player.playThread, self);
+        const thread = try std.Thread.spawn(.{}, Player.playThread, .{self});
         thread.detach();
     }
 
@@ -227,7 +229,7 @@ pub const Player = struct {
     }
 
     fn playThread(ctx: *anyopaque) !void {
-        var self: *Player = @ptrCast(ctx);
+        var self: *Player = @ptrCast(@alignCast(ctx));
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -240,25 +242,25 @@ pub const Player = struct {
         }
         self.state = .play;
         if (!self.eof) {
-            const buf = self.getTempBuffer();
+            const buf = try self.getTempBuffer();
             defer {
-                if (self.buffer_pool) |p| {
-                    p.release(buf);
+                if (self.buffer_pool) |*p| {
+                    p.*.release(buf);
                 }
             }
-            while (self.buffer.len < self.buffer_size) {
+            while (self.buffer.items.len < self.buffer_size) {
                 const bytes_read = try self.read(buf.buf);
-                self.buffer.appendSlice(buf.buf[0..bytes_read]);
+                try self.buffer.appendSlice(buf.buf[0..bytes_read]);
                 if (bytes_read == 0) {
                     self.eof = true;
                     break;
                 }
             }
         }
-        if (self.eof and self.buffer.len == 0) {
+        if (self.eof and self.buffer.items.len == 0) {
             self.state = .paused;
         }
-        self.addToPlayers();
+        try self.addToPlayers();
     }
 
     fn resetImpl(self: *Player) void {
@@ -280,10 +282,10 @@ pub const Player = struct {
         self.buffer.clearAndFree();
     }
 
-    fn addToPlayers(self: *Player) void {
+    fn addToPlayers(self: *Player) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        self.mux.addPlayer(self);
+        try self.mux.addPlayer(self);
     }
 
     fn removeFromPlayers(self: *Player) void {
@@ -306,7 +308,7 @@ pub const Player = struct {
             return false;
         }
 
-        return self.buffer.len < self.buffer_size;
+        return self.buffer.items.len < self.buffer_size;
     }
 
     fn readBufferAndAdd(self: *Player, dst: []f32) usize {
@@ -319,34 +321,37 @@ pub const Player = struct {
 
         const format = self.mux.format;
         const bit_depth_in_bytes = format.byteLength();
-        const n = dst.len / bit_depth_in_bytes;
-        if (n > self.buffer.len) {
-            n = self.buffer.len;
+        var n = dst.len / bit_depth_in_bytes;
+        if (n > self.buffer.items.len) {
+            n = self.buffer.items.len;
         }
 
         const previous_volume: f32 = @floatCast(self.previous_volume);
         const volume: f32 = @floatCast(self.volume);
 
         const channel_count = self.mux.channel_count;
-        const rate_denominator: f32 = @floatCast(n / channel_count);
+        const rate_denominator: f32 = @as(f32, @floatFromInt(n)) / @as(f32, @floatFromInt(channel_count));
 
-        const src = self.buffer[0 .. n * bit_depth_in_bytes];
+        const src = self.buffer.items[0 .. n * bit_depth_in_bytes];
         for (0..n) |i| {
             const v: f32 = switch (format) {
-                .float_32_le => @bitCast(src[4 * i] | src[4 * i + 1] << 8 | src[4 * i + 2] << 16 | src[4 * i + 3] << 24),
+                .float32_le => @bitCast(@as(u32, src[4 * i]) |
+                    (@as(u32, src[4 * i + 1]) << 8) |
+                    (@as(u32, src[4 * i + 2]) << 16) |
+                    (@as(u32, src[4 * i + 3]) << 24)),
                 .uint8 => blk: {
                     const v8 = src[i];
-                    break :blk (v8 - (1 << 7)) / (1 << 7);
+                    break :blk @as(f32, @floatFromInt(v8 - (1 << 7))) / (1 << 7);
                 },
                 .int16_le => blk: {
-                    const v16 = src[2 * i] | src[2 * i + 1] << 8;
-                    break :blk v16 / (1 << 15);
+                    const v16 = @as(u16, src[2 * i]) | (@as(u16, src[2 * i + 1]) << 8);
+                    break :blk @as(f32, @floatFromInt(v16)) / (1 << 15);
                 },
             };
             if (volume == previous_volume) {
                 dst[i] += v * volume;
             } else {
-                const rate = i / channel_count / rate_denominator;
+                var rate = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(channel_count)) / rate_denominator;
                 if (rate > 1) {
                     rate = 1;
                 }
@@ -355,18 +360,18 @@ pub const Player = struct {
         }
 
         self.previous_volume = volume;
-        const copy_size = self.buffer.len - (n * bit_depth_in_bytes);
-        @memcpy(self.buffer[0..copy_size], src[n * bit_depth_in_bytes ..]);
-        self.buffer = self.buffer[0..copy_size];
+        const copy_size = self.buffer.items.len - (n * bit_depth_in_bytes);
+        @memcpy(self.buffer.items[0..copy_size], src[n * bit_depth_in_bytes ..]);
+        self.buffer.items = self.buffer.items[0..copy_size];
 
-        if (self.eof and self.buffer.len == 0) {
+        if (self.eof and self.buffer.items.len == 0) {
             self.state = .paused;
         }
 
         return n;
     }
 
-    fn readSourceToBuffer(self: *Player) usize {
+    fn readSourceToBuffer(self: *Player) !usize {
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -374,30 +379,30 @@ pub const Player = struct {
             return 0;
         }
 
-        if (self.buffer.len >= self.buffer_size) {
+        if (self.buffer.items.len >= self.buffer_size) {
             return 0;
         }
 
-        const buf = self.getTempBuffer();
+        const buf = try self.getTempBuffer();
         defer {
-            if (self.buffer_pool) |p| {
-                p.release(buf);
+            if (self.buffer_pool) |*p| {
+                p.*.release(buf);
             }
         }
         const n = try self.read(buf.buf);
-        self.buffer.appendSlice(buf.buf[0..n]);
+        try self.buffer.appendSlice(buf.buf[0..n]);
         if (n == 0) {
             self.eof = true;
-            if (self.buffer.len == 0) {
+            if (self.buffer.items.len == 0) {
                 self.state = .paused;
             }
         }
         return n;
     }
 
-    fn getTempBuffer(self: *Player) *Buffer {
+    fn getTempBuffer(self: *Player) !*Buffer {
         if (self.buffer_pool == null) {
-            self.buffer_pool = try Pool.init(self.mux.allocator, self.buffer_size);
+            self.buffer_pool = try Pool.init(self.mux.allocator, @intCast(self.buffer_size), self.buffer_size);
         }
         const buffer = try self.buffer_pool.?.acquire();
         return buffer;
