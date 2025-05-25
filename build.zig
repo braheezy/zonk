@@ -67,8 +67,8 @@ pub fn build(b: *std.Build) void {
         zonk_mod.linkLibrary(zgpu.artifact("zdawn"));
     }
 
-    buildPong(b, target, optimize, zonk_mod, zpix);
-    buildAnimation(b, target, optimize, zonk_mod, zpix);
+    // buildPong(b, target, optimize, zonk_mod, zpix);
+    // buildAnimation(b, target, optimize, zonk_mod, zpix);
 
     const qoa_mod = b.createModule(.{
         .root_source_file = b.path("lib/qoa/qoa.zig"),
@@ -89,6 +89,15 @@ pub fn build(b: *std.Build) void {
     const run_qoaplay = b.addRunArtifact(qoaplay_exe);
     const run_qoaplay_step = b.step("qoaplay", "Run the qoaplay example");
     run_qoaplay_step.dependOn(&run_qoaplay.step);
+
+    const zoto_dep = b.dependency("zoto", .{});
+    const zoto_lib = zoto_dep.artifact("zoto");
+    const zoto_mod = zoto_dep.module("zoto");
+    qoaplay_mod.addImport("zoto", zoto_mod);
+    qoaplay_exe.linkLibrary(zoto_lib);
+
+    const macos_dep = b.dependency("macos", .{});
+    qoaplay_exe.linkLibrary(macos_dep.artifact("macos"));
 }
 
 fn buildPong(

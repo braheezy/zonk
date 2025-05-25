@@ -38,8 +38,11 @@ pub fn main() !void {
     };
 
     const context = try zoto.newContext(allocator, options);
-    _ = try play(allocator, context, 523.3, 3 * std.time.ns_per_s, options.channel_count, options.format, @intCast(options.sample_rate));
+    defer context.deinit();
+    const player = try play(allocator, context, 523.3, 3 * std.time.ns_per_s, options.channel_count, options.format, @intCast(options.sample_rate));
+    defer player.deinit();
     std.time.sleep(3 * std.time.ns_per_s);
+
     // options
 
     // print samples to file
@@ -69,7 +72,7 @@ fn play(
         sample_rate,
     );
     const reader = wave.reader();
-    const p = ctx.newPlayer(reader.any());
+    const p = try ctx.newPlayer(reader.any());
     try p.play();
     return p;
 }

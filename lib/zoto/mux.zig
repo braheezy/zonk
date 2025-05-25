@@ -39,8 +39,14 @@ pub const Mux = struct {
         return self;
     }
 
-    pub fn newPlayer(self: *Mux, src: std.io.AnyReader) *Player {
-        var player = Player{
+    pub fn deinit(self: *Mux) void {
+        self.players.deinit();
+        self.allocator.destroy(self);
+    }
+
+    pub fn newPlayer(self: *Mux, src: std.io.AnyReader) !*Player {
+        const player = try self.allocator.create(Player);
+        player.* = Player{
             .mux = self,
             .src = src,
             .previous_volume = 1.0,
@@ -48,7 +54,7 @@ pub const Mux = struct {
             .buffer = std.ArrayList(u8).init(self.allocator),
             .buffer_size = self.defaultBufferSize(),
         };
-        return &player;
+        return player;
     }
 
     pub fn addPlayer(self: *Mux, player: *Player) !void {
@@ -63,6 +69,7 @@ pub const Mux = struct {
         self.mutex.lock();
 
         const players = try self.players.clone();
+        defer players.deinit();
         self.mutex.unlock();
 
         @memset(dst, 0);
@@ -116,12 +123,13 @@ pub const Mux = struct {
 
 fn muxLoop(self: *Mux) !void {
     var players = std.ArrayList(*Player).init(self.allocator);
+    defer players.deinit();
     while (true) {
         self.wait();
 
         self.mutex.lock();
-        players.clearAndFree();
-        players = try self.players.clone();
+        players.clearRetainingCapacity();
+        try players.appendSlice(self.players.items);
         self.mutex.unlock();
 
         var all_zero = true;
@@ -280,23 +288,31 @@ pub const Player = struct {
         }
         self.state = .closed;
         self.buffer.clearAndFree();
+        if (self.buffer_pool) |*p| {
+            p.deinit();
+        }
+    }
+
+    pub fn deinit(self: *Player) void {
+        self.buffer.clearAndFree();
+        if (self.buffer_pool) |*p| {
+            p.deinit();
+        }
+        self.mux.allocator.destroy(self);
     }
 
     fn addToPlayers(self: *Player) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        // Note: This function assumes the caller already holds the mutex
         try self.mux.addPlayer(self);
     }
 
     fn removeFromPlayers(self: *Player) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        // Note: This function assumes the caller already holds the mutex
         self.mux.removePlayer(self);
     }
 
     fn read(self: *Player, buf: []u8) !usize {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        // Note: This function assumes the caller already holds the mutex
         return self.src.read(buf);
     }
 
@@ -402,7 +418,9 @@ pub const Player = struct {
 
     fn getTempBuffer(self: *Player) !*Buffer {
         if (self.buffer_pool == null) {
-            self.buffer_pool = try Pool.init(self.mux.allocator, @intCast(self.buffer_size), self.buffer_size);
+            // Create a pool with a reasonable number of buffers (e.g., 10)
+            // and use the actual buffer_size for the buffer size
+            self.buffer_pool = try Pool.init(self.mux.allocator, 1, self.buffer_size);
         }
         const buffer = try self.buffer_pool.?.acquire();
         return buffer;

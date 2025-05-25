@@ -87,7 +87,7 @@ extern "c" fn AudioQueuePause(
     aq: AudioQueueRef,
 ) i32;
 
-fn newAudioQueue(sample_rate: u32, channel_count: u32, one_buffer_size_in_bytes: u32) !struct { AudioQueueRef, []AudioQueueBufferRef } {
+fn newAudioQueue(allocator: std.mem.Allocator, sample_rate: u32, channel_count: u32, one_buffer_size_in_bytes: u32) !struct { AudioQueueRef, []AudioQueueBufferRef } {
     const description = AudioStreamBasicDescription{
         .sample_rate = @floatFromInt(sample_rate),
         .format_id = audio_format_linear_pcm,
@@ -113,7 +113,7 @@ fn newAudioQueue(sample_rate: u32, channel_count: u32, one_buffer_size_in_bytes:
         return error.AudioQueueNewOutputFailed;
     }
 
-    var bufs: [buffer_count]AudioQueueBufferRef = undefined;
+    const bufs = try allocator.alloc(AudioQueueBufferRef, buffer_count);
     var i: usize = 0;
     while (i < buffer_count) : (i += 1) {
         var buf: AudioQueueBufferRef = undefined;
@@ -129,12 +129,14 @@ fn newAudioQueue(sample_rate: u32, channel_count: u32, one_buffer_size_in_bytes:
         bufs[i] = buf;
     }
 
-    return .{ audio_queue, &bufs };
+    return .{ audio_queue, bufs };
 }
 
 pub const Context = struct {
     audio_queue: AudioQueueRef,
     unqueued_buffers: std.ArrayList(AudioQueueBufferRef),
+    allocated_buffers: ?[]AudioQueueBufferRef = null,
+    buf32: ?[]f32 = null,
     one_buffer_size_in_bytes: u32,
     mutex: std.Thread.Mutex,
     condition: std.Thread.Condition,
@@ -190,6 +192,18 @@ pub const Context = struct {
         return c;
     }
 
+    pub fn deinit(self: *Context) void {
+        self.mux.deinit();
+        self.unqueued_buffers.deinit();
+        if (self.allocated_buffers) |buffers| {
+            self.allocator.free(buffers);
+        }
+        if (self.buf32) |buf| {
+            self.allocator.free(buf);
+        }
+        self.allocator.destroy(self);
+    }
+
     pub fn waitForReady(self: *Context) void {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -227,8 +241,8 @@ pub const Context = struct {
         return self.err;
     }
 
-    pub fn newPlayer(self: *Context, reader: std.io.AnyReader) *Player {
-        return self.mux.newPlayer(reader);
+    pub fn newPlayer(self: *Context, reader: std.io.AnyReader) !*Player {
+        return try self.mux.newPlayer(reader);
     }
 
     fn wait(self: *Context) bool {
@@ -242,13 +256,17 @@ pub const Context = struct {
     }
 
     fn loop(self: *Context) void {
-        const buf32 = self.allocator.alloc(f32, self.one_buffer_size_in_bytes / 4) catch |loop_err| {
-            self.mutex.lock();
-            if (self.err == null) self.err = loop_err;
-            self.mutex.unlock();
-            return;
-        };
-        defer self.allocator.free(buf32);
+        // Allocate the buffer once and store it in the context
+        if (self.buf32 == null) {
+            self.buf32 = self.allocator.alloc(f32, self.one_buffer_size_in_bytes / 4) catch |loop_err| {
+                self.mutex.lock();
+                if (self.err == null) self.err = loop_err;
+                self.mutex.unlock();
+                return;
+            };
+        }
+
+        const buf32 = self.buf32.?;
 
         while (true) {
             if (!self.wait()) {
@@ -375,6 +393,7 @@ fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void 
 
     // Call newAudioQueue equivalent
     const q, const bs = newAudioQueue(
+        ctx.allocator,
         sample_rate,
         channel_count,
         ctx.one_buffer_size_in_bytes,
@@ -385,6 +404,7 @@ fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void 
     };
 
     ctx.audio_queue = q;
+    ctx.allocated_buffers = bs;
     ctx.unqueued_buffers.clearAndFree();
     ctx.unqueued_buffers.appendSlice(bs) catch |err| {
         std.log.err("Failed to append buffers in audioContextWorker: {any}", .{err});
