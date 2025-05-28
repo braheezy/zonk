@@ -77,6 +77,7 @@ pub const Mux = struct {
         for (players.items) |player| {
             _ = player.readBufferAndAdd(dst);
         }
+
         self.condition.signal();
     }
 
@@ -86,7 +87,7 @@ pub const Mux = struct {
 
         for (self.players.items, 0..) |p, i| {
             if (p == player) {
-                self.players.orderedRemove(i);
+                _ = self.players.orderedRemove(i);
                 break;
             }
         }
@@ -249,6 +250,7 @@ pub const Player = struct {
             return;
         }
         self.state = .play;
+
         if (!self.eof) {
             const buf = try self.getTempBuffer();
             defer {
@@ -256,6 +258,7 @@ pub const Player = struct {
                     p.*.release(buf);
                 }
             }
+
             while (self.buffer.items.len < self.buffer_size) {
                 const bytes_read = try self.read(buf.buf);
                 try self.buffer.appendSlice(buf.buf[0..bytes_read]);
@@ -265,9 +268,11 @@ pub const Player = struct {
                 }
             }
         }
+
         if (self.eof and self.buffer.items.len == 0) {
             self.state = .paused;
         }
+
         try self.addToPlayers();
     }
 
@@ -313,7 +318,12 @@ pub const Player = struct {
 
     fn read(self: *Player, buf: []u8) !usize {
         // Note: This function assumes the caller already holds the mutex
-        return self.src.read(buf);
+        const result = self.src.read(buf);
+        const bytes_read = result catch |err| {
+            std.debug.print("Player.read: src.read failed with error: {}\n", .{err});
+            return err;
+        };
+        return bytes_read;
     }
 
     fn canReadSourceToBuffer(self: *Player) bool {
@@ -349,6 +359,7 @@ pub const Player = struct {
         const rate_denominator: f32 = @as(f32, @floatFromInt(n)) / @as(f32, @floatFromInt(channel_count));
 
         const src = self.buffer.items[0 .. n * bit_depth_in_bytes];
+
         for (0..n) |i| {
             const v: f32 = switch (format) {
                 .float32_le => @bitCast(@as(u32, src[4 * i]) |
@@ -360,8 +371,9 @@ pub const Player = struct {
                     break :blk @as(f32, @floatFromInt(v8 - (1 << 7))) / (1 << 7);
                 },
                 .int16_le => blk: {
-                    const v16 = @as(u16, src[2 * i]) | (@as(u16, src[2 * i + 1]) << 8);
-                    break :blk @as(f32, @floatFromInt(v16)) / (1 << 15);
+                    const v16_unsigned = @as(u16, src[2 * i]) | (@as(u16, src[2 * i + 1]) << 8);
+                    const v16_signed = @as(i16, @bitCast(v16_unsigned));
+                    break :blk @as(f32, @floatFromInt(v16_signed)) / 32767.0;
                 },
             };
             if (volume == previous_volume) {
@@ -377,8 +389,15 @@ pub const Player = struct {
 
         self.previous_volume = volume;
         const copy_size = self.buffer.items.len - (n * bit_depth_in_bytes);
-        @memcpy(self.buffer.items[0..copy_size], src[n * bit_depth_in_bytes ..]);
-        self.buffer.items = self.buffer.items[0..copy_size];
+        const src_remaining = src[n * bit_depth_in_bytes ..];
+
+        if (copy_size > 0 and src_remaining.len > 0) {
+            const actual_copy_size = @min(copy_size, src_remaining.len);
+            @memcpy(self.buffer.items[0..actual_copy_size], src_remaining[0..actual_copy_size]);
+            self.buffer.items = self.buffer.items[0..actual_copy_size];
+        } else {
+            self.buffer.items = self.buffer.items[0..0];
+        }
 
         if (self.eof and self.buffer.items.len == 0) {
             self.state = .paused;
@@ -422,6 +441,7 @@ pub const Player = struct {
             // and use the actual buffer_size for the buffer size
             self.buffer_pool = try Pool.init(self.mux.allocator, 1, self.buffer_size);
         }
+
         const buffer = try self.buffer_pool.?.acquire();
         return buffer;
     }

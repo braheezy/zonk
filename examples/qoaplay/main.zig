@@ -4,6 +4,7 @@ const qoa = @import("qoa");
 const zoto = @import("zoto");
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
 pub fn main() !void {
     // Memory allocation setup
     const allocator, const is_debug = gpa: {
@@ -13,23 +14,15 @@ pub fn main() !void {
             .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
         };
     };
-    defer if (is_debug) {
-        if (debug_allocator.deinit() == .leak) {
-            std.process.exit(1);
+    defer {
+        if (is_debug) {
+            if (debug_allocator.deinit() == .leak) {
+                std.process.exit(1);
+            }
         }
-    };
+    }
 
-    const data = @embedFile("test.qoa");
-    const result = try qoa.decode(allocator, data);
-    const decoder = result.decoder;
-    defer allocator.free(result.samples);
-
-    std.debug.print("sample_count: {d}\n", .{decoder.sample_count});
-    std.debug.print("channels: {d}\n", .{decoder.channels});
-    std.debug.print("samplerate: {d}\n", .{decoder.sample_rate});
-
-    zoto.printOSVersion();
-    // zoto.playAudio("kameks-theme.flac");
+    std.debug.print("Playing 440Hz sine wave for 3 seconds...\n", .{});
 
     const options = zoto.ContextOptions{
         .sample_rate = 48000,
@@ -38,23 +31,23 @@ pub fn main() !void {
     };
 
     const context = try zoto.newContext(allocator, options);
-    defer context.deinit();
-    const player = try play(allocator, context, 523.3, 3 * std.time.ns_per_s, options.channel_count, options.format, @intCast(options.sample_rate));
-    defer player.deinit();
-    std.time.sleep(3 * std.time.ns_per_s);
+    defer {
+        // Give the context time to clean up properly
+        std.time.sleep(std.time.ns_per_ms * 100);
+        context.deinit();
+    }
 
-    // options
+    context.waitForReady();
 
-    // print samples to file
-    // const file = try std.fs.cwd().createFile("samples.txt", .{});
-    // defer file.close();
-    // for (samples) |sample| {
-    //     try std.fmt.formatInt(sample, 10, .lower, .{}, file.writer());
-    //     try file.writeAll("\n");
-    // }
+    const freq = 440.0; // A note (more audible)
+    const duration = 3 * std.time.ns_per_s;
+
+    try playAndWait(allocator, context, freq, duration, options.channel_count, options.format, @intCast(options.sample_rate));
+
+    std.debug.print("Done!\n", .{});
 }
 
-fn play(
+fn playAndWait(
     allocator: std.mem.Allocator,
     ctx: *zoto.Context,
     freq: f64,
@@ -62,30 +55,62 @@ fn play(
     channel_count: usize,
     format: zoto.Format,
     sample_rate: u32,
-) !*zoto.Player {
-    var wave = newSineWave(
-        allocator,
-        freq,
-        duration,
-        channel_count,
-        format,
-        sample_rate,
-    );
-    const reader = wave.reader();
-    const p = try ctx.newPlayer(reader.any());
-    try p.play();
-    return p;
+) !void {
+    // Create the sine wave reader
+    const sine_wave = try newSineWave(allocator, freq, duration, channel_count, format, sample_rate);
+    defer sine_wave.deinit();
+
+    // Create AnyReader using the explicit type
+    const any_reader = std.io.AnyReader{
+        .context = @ptrCast(sine_wave),
+        .readFn = struct {
+            fn read(context: *const anyopaque, buffer: []u8) anyerror!usize {
+                const self: *SineWave = @ptrCast(@alignCast(@constCast(context)));
+                return self.read(buffer);
+            }
+        }.read,
+    };
+
+    const player = try ctx.newPlayer(any_reader);
+    defer player.deinit();
+
+    try player.play();
+
+    // Wait for the player to actually start playing
+    while (!player.isPlaying()) {
+        std.time.sleep(std.time.ns_per_ms * 10);
+    }
+
+    // Wait for the full duration of the audio
+    const start_time = std.time.nanoTimestamp();
+
+    while (player.isPlaying()) {
+        const elapsed = std.time.nanoTimestamp() - start_time;
+
+        if (elapsed >= duration) {
+            break;
+        }
+        std.time.sleep(std.time.ns_per_ms * 50);
+    }
+
+    // Wait for any remaining audio to finish playing
+    while (player.isPlaying()) {
+        std.time.sleep(std.time.ns_per_ms * 10);
+    }
+
+    // Give extra time for the audio system to clean up
+    std.time.sleep(std.time.ns_per_ms * 500);
 }
 
 const SineWave = struct {
     freq: f64,
-    length: usize,
-    position: usize,
+    duration_ns: u64,
+    start_time: i128,
     channel_count: u8,
     format: zoto.Format,
     sample_rate: u32,
     allocator: std.mem.Allocator,
-    remaining: std.ArrayList(u8),
+    sample_position: u64,
 
     const Self = @This();
     const ReadError = error{};
@@ -96,107 +121,83 @@ const SineWave = struct {
     }
 
     pub fn read(self: *Self, buf: []u8) ReadError!usize {
-        // Handle remaining bytes from previous read
-        if (self.remaining.items.len > 0) {
-            const n = @min(buf.len, self.remaining.items.len);
-            @memcpy(buf[0..n], self.remaining.items[0..n]);
-            self.remaining.replaceRange(0, n, &[_]u8{}) catch unreachable;
-            return n;
-        }
-
-        // Check for EOF
-        if (self.position >= self.length) {
+        // Check if we've exceeded the duration
+        const current_time = std.time.nanoTimestamp();
+        const elapsed = current_time - self.start_time;
+        if (elapsed >= self.duration_ns) {
             return 0;
         }
 
-        var write_buf = buf;
-        var eof = false;
+        const bytes_per_sample = formatByteLength(self.format) * @as(usize, self.channel_count);
 
-        // Check if we would exceed length
-        if (self.position + buf.len > self.length) {
-            write_buf = buf[0 .. self.length - self.position];
-            eof = true;
+        // Generate as much as requested, but align to sample boundaries
+        var bytes_to_generate = buf.len;
+        bytes_to_generate = (bytes_to_generate / bytes_per_sample) * bytes_per_sample;
+
+        if (bytes_to_generate == 0) {
+            return 0;
         }
 
-        // Handle buffer alignment for formats that need it
-        var orig_buf_len: ?usize = null;
-        if (write_buf.len % 4 > 0) {
-            orig_buf_len = write_buf.len;
-            const aligned_size = write_buf.len + (4 - write_buf.len % 4);
-            // Use remaining array as temporary buffer for alignment
-            self.remaining.resize(aligned_size) catch return 0;
-            write_buf = self.remaining.items;
-        }
-
-        const length = @as(f64, @floatFromInt(self.sample_rate)) / self.freq;
-        const num = formatByteLength(self.format) * @as(usize, self.channel_count);
-        var p = self.position / num;
+        const samples_to_generate = bytes_to_generate / bytes_per_sample;
+        const samples_per_cycle = @as(f64, @floatFromInt(self.sample_rate)) / self.freq;
 
         switch (self.format) {
             .float32_le => {
                 var i: usize = 0;
-                while (i < write_buf.len / num) : (i += 1) {
-                    const sample = @sin(2.0 * std.math.pi * @as(f64, @floatFromInt(p)) / length) * 0.3;
+                while (i < samples_to_generate) : (i += 1) {
+                    const sample_index = self.sample_position + i;
+                    const phase = 2.0 * std.math.pi * @as(f64, @floatFromInt(sample_index)) / samples_per_cycle;
+                    const sample = @sin(phase) * 0.95; // Maximum safe volume
                     const bits = @as(u32, @bitCast(@as(f32, @floatCast(sample))));
 
                     var ch: usize = 0;
                     while (ch < self.channel_count) : (ch += 1) {
-                        write_buf[num * i + 4 * ch] = @as(u8, @truncate(bits));
-                        write_buf[num * i + 1 + 4 * ch] = @as(u8, @truncate(bits >> 8));
-                        write_buf[num * i + 2 + 4 * ch] = @as(u8, @truncate(bits >> 16));
-                        write_buf[num * i + 3 + 4 * ch] = @as(u8, @truncate(bits >> 24));
+                        const byte_offset = i * bytes_per_sample + ch * 4;
+                        buf[byte_offset] = @as(u8, @truncate(bits));
+                        buf[byte_offset + 1] = @as(u8, @truncate(bits >> 8));
+                        buf[byte_offset + 2] = @as(u8, @truncate(bits >> 16));
+                        buf[byte_offset + 3] = @as(u8, @truncate(bits >> 24));
                     }
-                    p += 1;
                 }
             },
             .uint8 => {
                 var i: usize = 0;
-                while (i < write_buf.len / num) : (i += 1) {
-                    const max = 127;
-                    const sample = @sin(2.0 * std.math.pi * @as(f64, @floatFromInt(p)) / length) * 0.3 * max;
-                    const b: u8 = @intFromFloat(sample + 128);
+                while (i < samples_to_generate) : (i += 1) {
+                    const sample_index = self.sample_position + i;
+                    const phase = 2.0 * std.math.pi * @as(f64, @floatFromInt(sample_index)) / samples_per_cycle;
+                    const sample = @sin(phase) * 0.95; // Maximum safe volume
+                    const b: u8 = @intFromFloat(sample * 127.0 + 128.0);
 
                     var ch: usize = 0;
                     while (ch < self.channel_count) : (ch += 1) {
-                        write_buf[num * i + ch] = b;
+                        buf[i * bytes_per_sample + ch] = b;
                     }
-                    p += 1;
                 }
             },
             .int16_le => {
                 var i: usize = 0;
-                while (i < write_buf.len / num) : (i += 1) {
-                    const max = 32767;
-                    const sample = @sin(2.0 * std.math.pi * @as(f64, @floatFromInt(p)) / length) * 0.3 * max;
-                    const b: i16 = @intFromFloat(sample);
+                while (i < samples_to_generate) : (i += 1) {
+                    const sample_index = self.sample_position + i;
+                    const phase = 2.0 * std.math.pi * @as(f64, @floatFromInt(sample_index)) / samples_per_cycle;
+                    const sample = @sin(phase) * 0.95; // Maximum safe volume, continuous sine wave
+                    const b: i16 = @intFromFloat(sample * 32767.0);
 
                     var ch: usize = 0;
                     while (ch < self.channel_count) : (ch += 1) {
-                        write_buf[num * i + 2 * ch] = @as(u8, @truncate(@as(u16, @bitCast(b))));
-                        write_buf[num * i + 1 + 2 * ch] = @as(u8, @truncate(@as(u16, @bitCast(b)) >> 8));
+                        const byte_offset = i * bytes_per_sample + ch * 2;
+                        buf[byte_offset] = @as(u8, @truncate(@as(u16, @bitCast(b))));
+                        buf[byte_offset + 1] = @as(u8, @truncate(@as(u16, @bitCast(b)) >> 8));
                     }
-                    p += 1;
                 }
             },
         }
 
-        self.position += write_buf.len;
-
-        // Handle original buffer size if we had alignment issues
-        if (orig_buf_len) |orig_len| {
-            @memcpy(buf[0..orig_len], write_buf[0..orig_len]);
-            // Store remaining bytes for next read
-            if (write_buf.len > orig_len) {
-                self.remaining.replaceRange(0, self.remaining.items.len, write_buf[orig_len..]) catch return orig_len;
-            }
-            return orig_len;
-        }
-
-        return write_buf.len;
+        self.sample_position += samples_to_generate;
+        return bytes_to_generate;
     }
 
     pub fn deinit(self: *Self) void {
-        self.remaining.deinit();
+        self.allocator.destroy(self);
     }
 };
 
@@ -208,17 +209,17 @@ fn formatByteLength(format: zoto.Format) usize {
     };
 }
 
-fn newSineWave(allocator: std.mem.Allocator, freq: f64, duration: usize, channel_count: usize, format: zoto.Format, sample_rate: u32) SineWave {
-    const l = channel_count * formatByteLength(format) * @as(usize, sample_rate) * duration / std.time.ns_per_s;
-    const aligned_l = (l / 4) * 4;
-    return SineWave{
+fn newSineWave(allocator: std.mem.Allocator, freq: f64, duration: usize, channel_count: usize, format: zoto.Format, sample_rate: u32) !*SineWave {
+    const wave = try allocator.create(SineWave);
+    wave.* = SineWave{
         .freq = freq,
-        .length = aligned_l,
-        .position = 0,
+        .duration_ns = @intCast(duration),
+        .start_time = std.time.nanoTimestamp(),
         .channel_count = @intCast(channel_count),
         .format = format,
         .sample_rate = sample_rate,
         .allocator = allocator,
-        .remaining = std.ArrayList(u8).init(allocator),
+        .sample_position = 0,
     };
+    return wave;
 }
