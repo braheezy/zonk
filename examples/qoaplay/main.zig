@@ -139,7 +139,6 @@ const SineWave = struct {
     format: zoto.Format,
     sample_rate: u32,
     allocator: std.mem.Allocator,
-    debug_file: ?std.fs.File,
     sample_count: usize,
 
     const Self = @This();
@@ -152,11 +151,6 @@ const SineWave = struct {
 
     pub fn read(self: *Self, buf: []u8) ReadError!usize {
         if (self.pos >= self.length) {
-            // Close debug file when done
-            if (self.debug_file) |file| {
-                file.close();
-                self.debug_file = null;
-            }
             return 0; // EOF
         }
 
@@ -214,16 +208,6 @@ const SineWave = struct {
                     const sample = @sin(2.0 * std.math.pi * @as(f64, @floatFromInt(current_sample_index)) / length) * 0.3;
                     const b: i16 = @intFromFloat(sample * 32767);
 
-                    // Debug: dump first 100 samples
-                    if (self.sample_count < 100) {
-                        if (self.debug_file) |file| {
-                            const debug_msg = std.fmt.allocPrint(self.allocator, "Sample {}: p={}, sample={d:.6} (int16)\n", .{ self.sample_count, current_sample_index, sample }) catch unreachable;
-                            defer self.allocator.free(debug_msg);
-                            _ = file.write(debug_msg) catch {};
-                        }
-                        self.sample_count += 1;
-                    }
-
                     for (0..@as(usize, @intCast(self.channel_count))) |ch| {
                         const byte_offset = bytes_per_sample * i + 2 * ch;
                         buf[byte_offset] = @as(u8, @truncate(@as(u16, @bitCast(b))));
@@ -259,9 +243,6 @@ fn newSineWave(allocator: std.mem.Allocator, freq: f64, duration: usize, channel
     l = @divTrunc(l, @as(i64, @intCast(std.time.ns_per_s)));
     l = @divTrunc(l, 4) * 4; // Align to 4-byte boundary
 
-    // Create debug file
-    const debug_file = std.fs.cwd().createFile("zig_samples.txt", .{}) catch null;
-
     wave.* = SineWave{
         .freq = freq,
         .length = l,
@@ -270,7 +251,6 @@ fn newSineWave(allocator: std.mem.Allocator, freq: f64, duration: usize, channel
         .format = format,
         .sample_rate = sample_rate,
         .allocator = allocator,
-        .debug_file = debug_file,
         .sample_count = 0,
     };
     return wave;

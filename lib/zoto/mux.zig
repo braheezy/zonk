@@ -24,6 +24,7 @@ pub const Mux = struct {
     allocator: std.mem.Allocator,
     mutex: std.Thread.Mutex = .{},
     condition: std.Thread.Condition = .{},
+    shutdown: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, sample_rate: u32, channel_count: u8, format: Format) !*Mux {
         const self = try allocator.create(Mux);
@@ -40,6 +41,15 @@ pub const Mux = struct {
     }
 
     pub fn deinit(self: *Mux) void {
+        // Signal shutdown and wake up the mux loop
+        self.mutex.lock();
+        self.shutdown = true;
+        self.condition.signal();
+        self.mutex.unlock();
+
+        // Give the loop time to exit
+        std.time.sleep(std.time.ns_per_ms * 10);
+
         self.players.deinit();
         self.allocator.destroy(self);
     }
@@ -113,6 +123,9 @@ pub const Mux = struct {
     }
 
     fn shouldWait(self: *Mux) bool {
+        if (self.shutdown) {
+            return false;
+        }
         for (self.players.items) |player| {
             if (player.canReadSourceToBuffer()) {
                 return false;
@@ -125,10 +138,18 @@ pub const Mux = struct {
 fn muxLoop(self: *Mux) !void {
     var players = std.ArrayList(*Player).init(self.allocator);
     defer players.deinit();
+
     while (true) {
         self.wait();
 
+        // Check if shutdown was requested
         self.mutex.lock();
+        const should_shutdown = self.shutdown;
+        if (should_shutdown) {
+            self.mutex.unlock();
+            break;
+        }
+
         players.clearRetainingCapacity();
         try players.appendSlice(self.players.items);
         self.mutex.unlock();
