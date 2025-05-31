@@ -96,7 +96,7 @@ pub const Mux = struct {
 
     fn defaultBufferSize(self: *Mux) usize {
         const bytes_per_sample = @as(usize, @intCast(self.channel_count)) * self.format.byteLength();
-        const s = self.sample_rate * bytes_per_sample / 2; // 0.5[s] - match Go exactly
+        const s = self.sample_rate * bytes_per_sample / 2;
         return (s / bytes_per_sample) * bytes_per_sample;
     }
 
@@ -168,9 +168,8 @@ pub const Player = struct {
     mutex: std.Thread.Mutex = .{},
 
     pub fn play(self: *Player) !void {
-        // Match Go implementation exactly - quick sync operation
         const thread = try std.Thread.spawn(.{}, Player.playThread, .{self});
-        thread.join(); // Wait for immediate completion like Go's <-ch
+        thread.join();
     }
 
     pub fn pause(self: *Player) void {
@@ -180,7 +179,7 @@ pub const Player = struct {
         if (self.state != .play) {
             return;
         }
-        self.state = .pause;
+        self.state = .paused;
     }
 
     pub fn setBufferSize(self: *Player, buffer_size: usize) void {
@@ -237,12 +236,19 @@ pub const Player = struct {
         try self.closeImpl();
     }
 
+    pub fn deinit(self: *Player) void {
+        self.buffer.clearAndFree();
+        if (self.buffer_pool) |*p| {
+            p.deinit();
+        }
+        self.mux.allocator.destroy(self);
+    }
+
     fn playThread(ctx: *anyopaque) !void {
         var self: *Player = @ptrCast(@alignCast(ctx));
         self.mutex.lock();
         defer self.mutex.unlock();
         try self.playImpl();
-        // Thread exits immediately after playImpl, like Go
     }
 
     fn playImpl(self: *Player) !void {
@@ -298,14 +304,6 @@ pub const Player = struct {
         }
     }
 
-    pub fn deinit(self: *Player) void {
-        self.buffer.clearAndFree();
-        if (self.buffer_pool) |*p| {
-            p.deinit();
-        }
-        self.mux.allocator.destroy(self);
-    }
-
     fn addToPlayers(self: *Player) !void {
         // Note: This function assumes the caller already holds the mutex
         try self.mux.addPlayer(self);
@@ -347,7 +345,7 @@ pub const Player = struct {
 
         const format = self.mux.format;
         const bit_depth_in_bytes = format.byteLength();
-        var n = dst.len; // dst.len is already in samples
+        var n = dst.len;
         const bytes_needed = n * bit_depth_in_bytes;
         if (bytes_needed > self.buffer.items.len) {
             n = self.buffer.items.len / bit_depth_in_bytes;
@@ -389,16 +387,17 @@ pub const Player = struct {
         }
 
         self.previous_volume = volume;
-        const copy_size = self.buffer.items.len - (n * bit_depth_in_bytes);
-        const src_remaining = src[n * bit_depth_in_bytes ..];
 
-        if (copy_size > 0 and src_remaining.len > 0) {
-            const actual_copy_size = @min(copy_size, src_remaining.len);
-            @memcpy(self.buffer.items[0..actual_copy_size], src_remaining[0..actual_copy_size]);
-            self.buffer.items = self.buffer.items[0..actual_copy_size];
-        } else {
-            self.buffer.items = self.buffer.items[0..0];
+        const consumed_bytes = n * bit_depth_in_bytes;
+        const remaining_bytes = self.buffer.items.len - consumed_bytes;
+
+        if (remaining_bytes > 0) {
+            // Copy remaining data to the front of the buffer
+            std.mem.copyForwards(u8, self.buffer.items[0..remaining_bytes], self.buffer.items[consumed_bytes..]);
         }
+
+        // Resize buffer to only include remaining data
+        self.buffer.items = self.buffer.items[0..remaining_bytes];
 
         if (self.eof and self.buffer.items.len == 0) {
             self.state = .paused;

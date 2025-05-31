@@ -88,8 +88,6 @@ extern "c" fn AudioQueuePause(
 ) i32;
 
 fn newAudioQueue(allocator: std.mem.Allocator, sample_rate: u32, channel_count: u32, one_buffer_size_in_bytes: u32) !struct { AudioQueueRef, []AudioQueueBufferRef } {
-    std.debug.print("newAudioQueue: sample_rate={}, channel_count={}, buffer_size={}\n", .{ sample_rate, channel_count, one_buffer_size_in_bytes });
-
     const description = AudioStreamBasicDescription{
         .sample_rate = @floatFromInt(sample_rate),
         .format_id = audio_format_linear_pcm,
@@ -100,8 +98,6 @@ fn newAudioQueue(allocator: std.mem.Allocator, sample_rate: u32, channel_count: 
         .channels_per_frame = channel_count,
         .bits_per_channel = 8 * float32_size_in_bytes,
     };
-
-    std.debug.print("AudioStreamBasicDescription: sample_rate={d}, format_id=0x{x}, format_flags=0x{x}, bytes_per_frame={}, channels_per_frame={}\n", .{ description.sample_rate, description.format_id, description.format_flags, description.bytes_per_frame, description.channels_per_frame });
 
     var audio_queue: AudioQueueRef = undefined;
     const err = AudioQueueNewOutput(
@@ -114,10 +110,9 @@ fn newAudioQueue(allocator: std.mem.Allocator, sample_rate: u32, channel_count: 
         &audio_queue,
     );
     if (err != no_err) {
-        std.debug.print("AudioQueueNewOutput failed with error: {}\n", .{err});
+        std.log.err("AudioQueueNewOutput failed with error: {}\n", .{err});
         return error.AudioQueueNewOutputFailed;
     }
-    std.debug.print("AudioQueueNewOutput succeeded, audio_queue={}\n", .{audio_queue});
 
     const bufs = try allocator.alloc(AudioQueueBufferRef, buffer_count);
     var i: usize = 0;
@@ -125,19 +120,13 @@ fn newAudioQueue(allocator: std.mem.Allocator, sample_rate: u32, channel_count: 
         var buf: AudioQueueBufferRef = undefined;
         const osstatus = AudioQueueAllocateBuffer(audio_queue, one_buffer_size_in_bytes, &buf);
         if (osstatus != no_err) {
-            std.debug.print("AudioQueueAllocateBuffer failed for buffer {} with error: {}\n", .{ i, osstatus });
+            std.log.err("AudioQueueAllocateBuffer failed for buffer {} with error: {}\n", .{ i, osstatus });
             return error.AudioQueueAllocateBufferFailed;
         }
-        // Set mAudioDataByteSize to one_buffer_size_in_bytes
-        // This requires casting the buffer pointer to *AudioQueueBuffer and setting the field
-        // const buf_ptr = @ptrCast(*AudioQueueBuffer, @intToPtr(*anyopaque, buf));
-        // buf_ptr.audio_data_byte_size = one_buffer_size_in_bytes;
         buf.audio_data_byte_size = @intCast(one_buffer_size_in_bytes);
         bufs[i] = buf;
-        std.debug.print("Allocated buffer {}: capacity={}, data_ptr=0x{x}\n", .{ i, buf.audio_data_bytes_capacity, buf.audio_data });
     }
 
-    std.debug.print("newAudioQueue: successfully created {} buffers\n", .{buffer_count});
     return .{ audio_queue, bufs };
 }
 
@@ -157,8 +146,6 @@ pub const Context = struct {
     err: ?anyerror = null,
 
     pub fn init(allocator: std.mem.Allocator, sample_rate: u32, channel_count: u32, format: Format, buffer_size_in_bytes: u32) !*Context {
-        std.debug.print("Darwin driver init: sample_rate={}, channel_count={}, format={}, buffer_size={}\n", .{ sample_rate, channel_count, format, buffer_size_in_bytes });
-
         // defaultOneBufferSizeInBytes is the default buffer size in bytes.
         //
         // 12288 seems necessary at least on iPod touch (7th) and MacBook Pro 2020.
@@ -174,8 +161,6 @@ pub const Context = struct {
         }
         const bytes_per_sample = channel_count * float32_size_in_bytes;
         one_buffer_size_in_bytes = one_buffer_size_in_bytes / bytes_per_sample * bytes_per_sample;
-
-        std.debug.print("Darwin driver: using buffer size {} bytes per buffer\n", .{one_buffer_size_in_bytes});
 
         const c = try allocator.create(Context);
         c.* = Context{
@@ -198,7 +183,6 @@ pub const Context = struct {
 
         context = c;
 
-        std.debug.print("Darwin driver: spawning audio worker thread\n", .{});
         // Spawn the audio worker thread
         const thread = try std.Thread.spawn(.{}, audioContextWorker, .{ c, sample_rate, channel_count });
         thread.detach();
@@ -299,7 +283,6 @@ pub const Context = struct {
         }
 
         if (self.to_pause) {
-            std.debug.print("appendBuffer: pausing audio\n", .{});
             self.pauseImpl() catch |pause_err| {
                 if (self.err == null) self.err = pause_err;
             };
@@ -308,7 +291,6 @@ pub const Context = struct {
         }
 
         if (self.to_resume) {
-            std.debug.print("appendBuffer: resuming audio\n", .{});
             self.resumeImpl() catch |resume_err| {
                 if (self.err == null) self.err = resume_err;
             };
@@ -320,11 +302,10 @@ pub const Context = struct {
             return;
         }
 
-        // Match Go: buf := c.unqueuedBuffers[0]; copy(...); c.unqueuedBuffers = c.unqueuedBuffers[:len(...)-1]
         const buf = self.unqueued_buffers.items[0];
         // Remove first element by copying the rest forward
         std.mem.copyForwards(AudioQueueBufferRef, self.unqueued_buffers.items[0 .. self.unqueued_buffers.items.len - 1], self.unqueued_buffers.items[1..]);
-        _ = self.unqueued_buffers.pop(); // Remove the last element
+        _ = self.unqueued_buffers.pop();
 
         // Read audio data from mux
         self.mux.readFloat32s(buf32) catch |read_err| {
@@ -332,11 +313,9 @@ pub const Context = struct {
             return;
         };
 
-        // Copy float32 data to audio buffer - match Go exactly
         const audio_data_ptr: [*]f32 = @ptrFromInt(buf.audio_data);
         const audio_data_slice = audio_data_ptr[0 .. buf.audio_data_byte_size / float32_size_in_bytes];
 
-        // Direct copy like Go: copy(dst, src)
         @memcpy(audio_data_slice, buf32[0..@min(buf32.len, audio_data_slice.len)]);
 
         const osstatus = AudioQueueEnqueueBuffer(self.audio_queue, buf, 0, null);
@@ -402,22 +381,16 @@ pub const Context = struct {
 var context: *Context = undefined;
 
 fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void {
-    std.debug.print("audioContextWorker: starting worker thread\n", .{});
-
-    // Equivalent of runtime.LockOSThread() - in Zig this is handled by the thread itself
-
     var ready_closed = false;
     defer {
         ctx.mutex.lock();
         defer ctx.mutex.unlock();
         if (!ready_closed) {
-            // Signal ready completion (equivalent to close(ready))
             ctx.ready = true;
             ctx.condition.signal();
         }
     }
 
-    std.debug.print("audioContextWorker: calling newAudioQueue\n", .{});
     // Call newAudioQueue equivalent
     const q, const bs = newAudioQueue(
         ctx.allocator,
@@ -425,12 +398,11 @@ fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void 
         channel_count,
         ctx.one_buffer_size_in_bytes,
     ) catch |err| {
-        // Store error in context (equivalent to c.err.TryStore(err))
+        // Store error in context
         std.log.err("newAudioQueue failed: {any}", .{err});
         return;
     };
 
-    std.debug.print("audioContextWorker: newAudioQueue succeeded, setting up context\n", .{});
     ctx.audio_queue = q;
     ctx.allocated_buffers = bs;
     ctx.unqueued_buffers.clearAndFree();
@@ -439,25 +411,19 @@ fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void 
         return;
     };
 
-    std.debug.print("audioContextWorker: starting AudioQueue with empty buffers (Go approach)\n", .{});
-
     // setNotificationHandler() catch |err| {
     //     std.log.err("setNotificationHandler failed: {any}", .{err});
     //     return;
     // };
 
-    std.debug.print("audioContextWorker: starting AudioQueue\n", .{});
     var retry_count: i32 = 0;
     while (true) {
         const osstatus = AudioQueueStart(ctx.audio_queue, null);
         if (osstatus == no_err) {
-            std.debug.print("audioContextWorker: AudioQueueStart succeeded\n", .{});
             break;
         }
 
         if (osstatus == av_audio_session_error_code_cannot_start_playing and retry_count < 100) {
-            // TODO: use sleepTime() after investigating when this error happens.
-            std.debug.print("audioContextWorker: AudioQueueStart failed with cannot_start_playing, retrying... (attempt {})\n", .{retry_count + 1});
             std.time.sleep(10 * std.time.ns_per_ms);
             retry_count += 1;
             continue;
@@ -473,7 +439,6 @@ fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void 
     ctx.mutex.unlock();
     ready_closed = true;
 
-    std.debug.print("audioContextWorker: context ready, starting main loop\n", .{});
     // Start the main audio processing loop
     ctx.loop();
 }

@@ -16,13 +16,14 @@ pub fn main() !void {
     };
     defer {
         if (is_debug) {
-            // if (debug_allocator.deinit() == .leak) {
-            //     std.process.exit(0);
-            // }
+            if (debug_allocator.deinit() == .leak) {
+                std.process.exit(0);
+            }
         }
     }
 
-    std.debug.print("Playing 440Hz sine wave for 2 seconds...\n", .{});
+    std.debug.print("Testing audio pause and resume functionality...\n", .{});
+    std.debug.print("Playing 523.3 Hz sine wave with pause/resume demo...\n", .{});
 
     const options = zoto.ContextOptions{
         .sample_rate = 48000,
@@ -40,14 +41,14 @@ pub fn main() !void {
     context.waitForReady();
 
     const freq = 523.3; // C note (more audible)
-    const duration = 3 * std.time.ns_per_s;
+    const duration = 6 * std.time.ns_per_s; // 6 seconds total
 
-    try playAndWait(allocator, context, freq, duration, options.channel_count, options.format, @intCast(options.sample_rate));
+    try playWithPauseResume(allocator, context, freq, duration, options.channel_count, options.format, @intCast(options.sample_rate));
 
     std.debug.print("Done!\n", .{});
 }
 
-fn playAndWait(
+fn playWithPauseResume(
     allocator: std.mem.Allocator,
     ctx: *zoto.Context,
     freq: f64,
@@ -74,6 +75,8 @@ fn playAndWait(
     const player = try ctx.newPlayer(any_reader);
     defer player.deinit();
 
+    // Start playing
+    std.debug.print("▶️  Starting playback...\n", .{});
     try player.play();
 
     // Wait for the player to actually start playing
@@ -81,25 +84,51 @@ fn playAndWait(
         std.time.sleep(std.time.ns_per_ms * 10);
     }
 
-    // Wait for the full duration of the audio
+    // Play for 2 seconds
+    std.debug.print("🎵 Playing for 2 seconds...\n", .{});
+    std.time.sleep(2 * std.time.ns_per_s);
+
+    // Pause the audio using the context
+    std.debug.print("⏸️  Pausing playback...\n", .{});
+    try ctx.pause();
+
+    // Wait for pause to take effect
+    std.time.sleep(std.time.ns_per_ms * 100);
+
+    std.debug.print("✅ Audio paused using context.pause()\n", .{});
+
+    // Wait 2 seconds while paused
+    std.debug.print("🔇 Waiting 2 seconds while paused...\n", .{});
+    std.time.sleep(2 * std.time.ns_per_s);
+
+    // Resume playback using the context
+    std.debug.print("▶️  Resuming playback...\n", .{});
+    try ctx.play();
+
+    // Wait for resume to take effect
+    std.time.sleep(std.time.ns_per_ms * 100);
+
+    std.debug.print("✅ Audio resumed using context.play()\n", .{});
+
+    // Play for remaining time
+    std.debug.print("🎵 Playing remainder of audio...\n", .{});
+
+    // Wait for the audio to finish naturally or timeout
     const start_time = std.time.nanoTimestamp();
+    const max_wait_time = 10 * std.time.ns_per_s; // 10 second timeout
 
     while (player.isPlaying()) {
         const elapsed = std.time.nanoTimestamp() - start_time;
-
-        if (elapsed >= duration) {
+        if (elapsed >= max_wait_time) {
+            std.debug.print("⏰ Timeout reached, stopping playback\n", .{});
             break;
         }
         std.time.sleep(std.time.ns_per_ms * 50);
     }
 
-    // Wait for any remaining audio to finish playing
-    while (player.isPlaying()) {
-        std.time.sleep(std.time.ns_per_ms * 10);
-    }
-
     // Give extra time for the audio system to clean up
     std.time.sleep(std.time.ns_per_ms * 500);
+    std.debug.print("🏁 Playback completed\n", .{});
 }
 
 const SineWave = struct {

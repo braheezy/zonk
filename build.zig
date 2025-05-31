@@ -91,10 +91,8 @@ pub fn build(b: *std.Build) void {
     run_qoaplay_step.dependOn(&run_qoaplay.step);
 
     const zoto_dep = b.dependency("zoto", .{});
-    const zoto_lib = zoto_dep.artifact("zoto");
     const zoto_mod = zoto_dep.module("zoto");
     qoaplay_mod.addImport("zoto", zoto_mod);
-    qoaplay_exe.linkLibrary(zoto_lib);
 
     const macos_dep = b.dependency("macos", .{});
     qoaplay_exe.linkLibrary(macos_dep.artifact("macos"));
