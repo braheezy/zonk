@@ -96,7 +96,7 @@ pub const Mux = struct {
 
     fn defaultBufferSize(self: *Mux) usize {
         const bytes_per_sample = @as(usize, @intCast(self.channel_count)) * self.format.byteLength();
-        const s = self.sample_rate * bytes_per_sample / 20;
+        const s = self.sample_rate * bytes_per_sample / 2; // 0.5[s] - match Go exactly
         return (s / bytes_per_sample) * bytes_per_sample;
     }
 
@@ -168,9 +168,9 @@ pub const Player = struct {
     mutex: std.Thread.Mutex = .{},
 
     pub fn play(self: *Player) !void {
-        // Start a new thread to run playImpl
+        // Match Go implementation exactly - quick sync operation
         const thread = try std.Thread.spawn(.{}, Player.playThread, .{self});
-        thread.detach();
+        thread.join(); // Wait for immediate completion like Go's <-ch
     }
 
     pub fn pause(self: *Player) void {
@@ -241,8 +241,8 @@ pub const Player = struct {
         var self: *Player = @ptrCast(@alignCast(ctx));
         self.mutex.lock();
         defer self.mutex.unlock();
-
         try self.playImpl();
+        // Thread exits immediately after playImpl, like Go
     }
 
     fn playImpl(self: *Player) !void {
@@ -374,7 +374,7 @@ pub const Player = struct {
                 .int16_le => blk: {
                     const v16_unsigned = @as(u16, src[2 * i]) | (@as(u16, src[2 * i + 1]) << 8);
                     const v16_signed = @as(i16, @bitCast(v16_unsigned));
-                    break :blk @as(f32, @floatFromInt(v16_signed)) / 32767.0;
+                    break :blk @as(f32, @floatFromInt(v16_signed)) / (1 << 15);
                 },
             };
             if (volume == previous_volume) {

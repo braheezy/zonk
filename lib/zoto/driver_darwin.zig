@@ -317,41 +317,31 @@ pub const Context = struct {
         }
 
         if (self.unqueued_buffers.items.len == 0) {
-            std.debug.print("appendBuffer: no unqueued buffers available\n", .{});
             return;
         }
 
-        const buf = self.unqueued_buffers.orderedRemove(0);
-        std.debug.print("appendBuffer: processing buffer, {} unqueued buffers remaining\n", .{self.unqueued_buffers.items.len});
+        // Match Go: buf := c.unqueuedBuffers[0]; copy(...); c.unqueuedBuffers = c.unqueuedBuffers[:len(...)-1]
+        const buf = self.unqueued_buffers.items[0];
+        // Remove first element by copying the rest forward
+        std.mem.copyForwards(AudioQueueBufferRef, self.unqueued_buffers.items[0 .. self.unqueued_buffers.items.len - 1], self.unqueued_buffers.items[1..]);
+        _ = self.unqueued_buffers.pop(); // Remove the last element
 
         // Read audio data from mux
         self.mux.readFloat32s(buf32) catch |read_err| {
-            std.debug.print("appendBuffer: mux.readFloat32s failed: {}\n", .{read_err});
             if (self.err == null) self.err = read_err;
             return;
         };
 
-        // Copy float32 data to audio buffer
+        // Copy float32 data to audio buffer - match Go exactly
         const audio_data_ptr: [*]f32 = @ptrFromInt(buf.audio_data);
         const audio_data_slice = audio_data_ptr[0 .. buf.audio_data_byte_size / float32_size_in_bytes];
-        @memcpy(audio_data_slice, buf32[0..@min(buf32.len, audio_data_slice.len)]);
 
-        // Check if we have any non-zero audio data
-        var has_audio = false;
-        for (audio_data_slice[0..@min(10, audio_data_slice.len)]) |sample| {
-            if (sample != 0.0) {
-                has_audio = true;
-                break;
-            }
-        }
-        std.debug.print("appendBuffer: copied {} samples to audio buffer, has_audio={}\n", .{ @min(buf32.len, audio_data_slice.len), has_audio });
+        // Direct copy like Go: copy(dst, src)
+        @memcpy(audio_data_slice, buf32[0..@min(buf32.len, audio_data_slice.len)]);
 
         const osstatus = AudioQueueEnqueueBuffer(self.audio_queue, buf, 0, null);
         if (osstatus != no_err) {
-            std.debug.print("appendBuffer: AudioQueueEnqueueBuffer failed with error: {}\n", .{osstatus});
             if (self.err == null) self.err = error.AudioQueueEnqueueBufferFailed;
-        } else {
-            std.debug.print("appendBuffer: successfully enqueued buffer\n", .{});
         }
     }
 
@@ -449,6 +439,8 @@ fn audioContextWorker(ctx: *Context, sample_rate: u32, channel_count: u32) void 
         return;
     };
 
+    std.debug.print("audioContextWorker: starting AudioQueue with empty buffers (Go approach)\n", .{});
+
     // setNotificationHandler() catch |err| {
     //     std.log.err("setNotificationHandler failed: {any}", .{err});
     //     return;
@@ -544,8 +536,6 @@ fn render(user_data: ?*anyopaque, aq: AudioQueueRef, buffer: AudioQueueBufferRef
     _ = user_data;
     _ = aq;
 
-    std.debug.print("render: callback called, buffer processed\n", .{});
-
     context.mutex.lock();
     defer context.mutex.unlock();
 
@@ -554,8 +544,6 @@ fn render(user_data: ?*anyopaque, aq: AudioQueueRef, buffer: AudioQueueBufferRef
         std.log.err("Failed to append buffer in render callback: {}", .{err});
         return;
     };
-
-    std.debug.print("render: buffer returned to pool, {} unqueued buffers available\n", .{context.unqueued_buffers.items.len});
 
     // Signal that a buffer is available
     context.condition.signal();
