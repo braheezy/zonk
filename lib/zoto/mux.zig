@@ -96,7 +96,7 @@ pub const Mux = struct {
 
     fn defaultBufferSize(self: *Mux) usize {
         const bytes_per_sample = @as(usize, @intCast(self.channel_count)) * self.format.byteLength();
-        const s = self.sample_rate * bytes_per_sample / 2;
+        const s = self.sample_rate * bytes_per_sample / 20;
         return (s / bytes_per_sample) * bytes_per_sample;
     }
 
@@ -347,9 +347,10 @@ pub const Player = struct {
 
         const format = self.mux.format;
         const bit_depth_in_bytes = format.byteLength();
-        var n = dst.len / bit_depth_in_bytes;
-        if (n > self.buffer.items.len) {
-            n = self.buffer.items.len;
+        var n = dst.len; // dst.len is already in samples
+        const bytes_needed = n * bit_depth_in_bytes;
+        if (bytes_needed > self.buffer.items.len) {
+            n = self.buffer.items.len / bit_depth_in_bytes;
         }
 
         const previous_volume: f32 = @floatCast(self.previous_volume);

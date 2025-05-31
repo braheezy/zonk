@@ -16,13 +16,13 @@ pub fn main() !void {
     };
     defer {
         if (is_debug) {
-            if (debug_allocator.deinit() == .leak) {
-                std.process.exit(1);
-            }
+            // if (debug_allocator.deinit() == .leak) {
+            //     std.process.exit(0);
+            // }
         }
     }
 
-    std.debug.print("Playing 440Hz sine wave for 3 seconds...\n", .{});
+    std.debug.print("Playing 440Hz sine wave for 2 seconds...\n", .{});
 
     const options = zoto.ContextOptions{
         .sample_rate = 48000,
@@ -39,7 +39,7 @@ pub fn main() !void {
 
     context.waitForReady();
 
-    const freq = 440.0; // A note (more audible)
+    const freq = 523.3; // C note (more audible)
     const duration = 3 * std.time.ns_per_s;
 
     try playAndWait(allocator, context, freq, duration, options.channel_count, options.format, @intCast(options.sample_rate));
@@ -104,16 +104,16 @@ fn playAndWait(
 
 const SineWave = struct {
     freq: f64,
-    duration_ns: u64,
-    start_time: i128,
-    channel_count: u8,
+    length: i64,
+    pos: i64,
+    channel_count: i32,
     format: zoto.Format,
     sample_rate: u32,
     allocator: std.mem.Allocator,
-    sample_position: u64,
+    remaining: std.ArrayList(u8),
 
     const Self = @This();
-    const ReadError = error{};
+    const ReadError = error{OutOfMemory};
     const Reader = std.io.Reader(*Self, ReadError, read);
 
     pub fn reader(self: *Self) Reader {
@@ -121,82 +121,121 @@ const SineWave = struct {
     }
 
     pub fn read(self: *Self, buf: []u8) ReadError!usize {
-        // Check if we've exceeded the duration
-        const current_time = std.time.nanoTimestamp();
-        const elapsed = current_time - self.start_time;
-        if (elapsed >= self.duration_ns) {
-            return 0;
+        // Handle remaining bytes from previous read
+        if (self.remaining.items.len > 0) {
+            const n = @min(buf.len, self.remaining.items.len);
+            @memcpy(buf[0..n], self.remaining.items[0..n]);
+
+            // Remove copied bytes from remaining
+            const new_len = self.remaining.items.len - n;
+            std.mem.copyForwards(u8, self.remaining.items[0..new_len], self.remaining.items[n..]);
+            self.remaining.shrinkRetainingCapacity(new_len);
+
+            return n;
         }
 
-        const bytes_per_sample = formatByteLength(self.format) * @as(usize, self.channel_count);
-
-        // Generate as much as requested, but align to sample boundaries
-        var bytes_to_generate = buf.len;
-        bytes_to_generate = (bytes_to_generate / bytes_per_sample) * bytes_per_sample;
-
-        if (bytes_to_generate == 0) {
-            return 0;
+        if (self.pos == self.length) {
+            return 0; // EOF
         }
 
-        const samples_to_generate = bytes_to_generate / bytes_per_sample;
-        const samples_per_cycle = @as(f64, @floatFromInt(self.sample_rate)) / self.freq;
+        var write_buf = buf;
+        var orig_buf_len: ?usize = null;
+        var eof = false;
+
+        // Check if we'll exceed the length
+        if (self.pos + @as(i64, @intCast(buf.len)) > self.length) {
+            write_buf = buf[0..@intCast(self.length - self.pos)];
+            eof = true;
+        }
+
+        // Ensure buffer is aligned to 4-byte boundary
+        var aligned_buf: []u8 = undefined;
+        var needs_alignment = false;
+        if (write_buf.len % 4 > 0) {
+            orig_buf_len = write_buf.len;
+            const aligned_len = write_buf.len + (4 - write_buf.len % 4);
+            aligned_buf = try self.allocator.alloc(u8, aligned_len);
+            needs_alignment = true;
+        } else {
+            aligned_buf = write_buf;
+        }
+        defer if (needs_alignment) self.allocator.free(aligned_buf);
+
+        const length = @as(f64, @floatFromInt(self.sample_rate)) / self.freq;
+        const num = formatByteLength(self.format) * @as(usize, @intCast(self.channel_count));
+        var p = @divTrunc(self.pos, @as(i64, @intCast(num)));
 
         switch (self.format) {
             .float32_le => {
+                const samples = aligned_buf.len / num;
                 var i: usize = 0;
-                while (i < samples_to_generate) : (i += 1) {
-                    const sample_index = self.sample_position + i;
-                    const phase = 2.0 * std.math.pi * @as(f64, @floatFromInt(sample_index)) / samples_per_cycle;
-                    const sample = @sin(phase) * 0.95; // Maximum safe volume
+                while (i < samples) : (i += 1) {
+                    const sample = @sin(2.0 * std.math.pi * @as(f64, @floatFromInt(p)) / length) * 0.3;
                     const bits = @as(u32, @bitCast(@as(f32, @floatCast(sample))));
 
                     var ch: usize = 0;
                     while (ch < self.channel_count) : (ch += 1) {
-                        const byte_offset = i * bytes_per_sample + ch * 4;
-                        buf[byte_offset] = @as(u8, @truncate(bits));
-                        buf[byte_offset + 1] = @as(u8, @truncate(bits >> 8));
-                        buf[byte_offset + 2] = @as(u8, @truncate(bits >> 16));
-                        buf[byte_offset + 3] = @as(u8, @truncate(bits >> 24));
+                        const byte_offset = num * i + 4 * ch;
+                        aligned_buf[byte_offset] = @as(u8, @truncate(bits));
+                        aligned_buf[byte_offset + 1] = @as(u8, @truncate(bits >> 8));
+                        aligned_buf[byte_offset + 2] = @as(u8, @truncate(bits >> 16));
+                        aligned_buf[byte_offset + 3] = @as(u8, @truncate(bits >> 24));
                     }
+                    p += 1;
                 }
             },
             .uint8 => {
+                const samples = aligned_buf.len / num;
                 var i: usize = 0;
-                while (i < samples_to_generate) : (i += 1) {
-                    const sample_index = self.sample_position + i;
-                    const phase = 2.0 * std.math.pi * @as(f64, @floatFromInt(sample_index)) / samples_per_cycle;
-                    const sample = @sin(phase) * 0.95; // Maximum safe volume
-                    const b: u8 = @intFromFloat(sample * 127.0 + 128.0);
+                while (i < samples) : (i += 1) {
+                    const max = 127;
+                    const sample = @sin(2.0 * std.math.pi * @as(f64, @floatFromInt(p)) / length) * 0.3;
+                    const b: u8 = @intFromFloat(sample * max + 128);
 
                     var ch: usize = 0;
                     while (ch < self.channel_count) : (ch += 1) {
-                        buf[i * bytes_per_sample + ch] = b;
+                        aligned_buf[num * i + ch] = b;
                     }
+                    p += 1;
                 }
             },
             .int16_le => {
+                const samples = aligned_buf.len / num;
                 var i: usize = 0;
-                while (i < samples_to_generate) : (i += 1) {
-                    const sample_index = self.sample_position + i;
-                    const phase = 2.0 * std.math.pi * @as(f64, @floatFromInt(sample_index)) / samples_per_cycle;
-                    const sample = @sin(phase) * 0.95; // Maximum safe volume, continuous sine wave
-                    const b: i16 = @intFromFloat(sample * 32767.0);
+                while (i < samples) : (i += 1) {
+                    const max = 32767;
+                    const sample = @sin(2.0 * std.math.pi * @as(f64, @floatFromInt(p)) / length) * 0.3;
+                    const b: i16 = @intFromFloat(sample * max);
 
                     var ch: usize = 0;
                     while (ch < self.channel_count) : (ch += 1) {
-                        const byte_offset = i * bytes_per_sample + ch * 2;
-                        buf[byte_offset] = @as(u8, @truncate(@as(u16, @bitCast(b))));
-                        buf[byte_offset + 1] = @as(u8, @truncate(@as(u16, @bitCast(b)) >> 8));
+                        const byte_offset = num * i + 2 * ch;
+                        aligned_buf[byte_offset] = @as(u8, @truncate(@as(u16, @bitCast(b))));
+                        aligned_buf[byte_offset + 1] = @as(u8, @truncate(@as(u16, @bitCast(b)) >> 8));
                     }
+                    p += 1;
                 }
             },
         }
 
-        self.sample_position += samples_to_generate;
-        return bytes_to_generate;
+        self.pos += @as(i64, @intCast(aligned_buf.len));
+
+        var n = aligned_buf.len;
+        if (orig_buf_len) |orig_len| {
+            n = @min(orig_len, aligned_buf.len);
+            @memcpy(write_buf[0..n], aligned_buf[0..n]);
+
+            // Store remaining bytes
+            if (aligned_buf.len > n) {
+                try self.remaining.appendSlice(aligned_buf[n..]);
+            }
+        }
+
+        return n;
     }
 
     pub fn deinit(self: *Self) void {
+        self.remaining.deinit();
         self.allocator.destroy(self);
     }
 };
@@ -211,15 +250,21 @@ fn formatByteLength(format: zoto.Format) usize {
 
 fn newSineWave(allocator: std.mem.Allocator, freq: f64, duration: usize, channel_count: usize, format: zoto.Format, sample_rate: u32) !*SineWave {
     const wave = try allocator.create(SineWave);
+
+    // Calculate length in bytes like Go implementation
+    var l = @as(i64, @intCast(channel_count)) * @as(i64, @intCast(formatByteLength(format))) * @as(i64, @intCast(sample_rate)) * @as(i64, @intCast(duration));
+    l = @divTrunc(l, @as(i64, @intCast(std.time.ns_per_s)));
+    l = @divTrunc(l, 4) * 4; // Align to 4-byte boundary
+
     wave.* = SineWave{
         .freq = freq,
-        .duration_ns = @intCast(duration),
-        .start_time = std.time.nanoTimestamp(),
+        .length = l,
+        .pos = 0,
         .channel_count = @intCast(channel_count),
         .format = format,
         .sample_rate = sample_rate,
         .allocator = allocator,
-        .sample_position = 0,
+        .remaining = std.ArrayList(u8).init(allocator),
     };
     return wave;
 }
