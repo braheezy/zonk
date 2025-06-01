@@ -37,6 +37,7 @@ pub fn build(b: *std.Build) void {
         zonk_mod.addImport("png", zpix.module("png"));
         const image_mod = zpix.module("image");
         zonk_mod.addImport("image", image_mod);
+        zonk_mod.addImport("color", zpix.module("color"));
     }
 
     // harfbuzz

@@ -102,49 +102,164 @@ pub fn drawToDestination(self: *Image, dest: *RGBAImage, options: ?DrawImageOpti
     const src_start_x = src_bounds.min.x;
     const src_start_y = src_bounds.min.y;
 
-    // Copy pixels with transformation
-    var src_y: i32 = 0;
-    while (src_y < src_height) : (src_y += 1) {
-        var src_x: i32 = 0;
-        while (src_x < src_width) : (src_x += 1) {
-            // Apply geometry transformation
-            const transformed = opts.geom.apply(@as(f32, @floatFromInt(src_x)), @as(f32, @floatFromInt(src_y)));
+    // For simple identity transforms, use fast path
+    if (opts.geom.isIdentity()) {
+        // Fast path: direct pixel copy
+        var src_y: i32 = 0;
+        while (src_y < src_height) : (src_y += 1) {
+            var src_x: i32 = 0;
+            while (src_x < src_width) : (src_x += 1) {
+                const dest_x = src_x;
+                const dest_y = src_y;
 
-            const dest_x = @as(i32, @intFromFloat(transformed.x));
-            const dest_y = @as(i32, @intFromFloat(transformed.y));
+                // Skip if outside destination bounds
+                if (dest_x < dest_bounds.min.x or dest_x >= dest_bounds.max.x or
+                    dest_y < dest_bounds.min.y or dest_y >= dest_bounds.max.y)
+                {
+                    continue;
+                }
 
-            // Skip if outside destination bounds
-            if (dest_x < dest_bounds.min.x or dest_x >= dest_bounds.max.x or
-                dest_y < dest_bounds.min.y or dest_y >= dest_bounds.max.y)
-            {
-                continue;
+                // Get source pixel
+                const actual_src_x = src_start_x + src_x;
+                const actual_src_y = src_start_y + (src_height - 1 - src_y); // Flip Y axis
+                const src_pixel = self.rgba_image.rgbaAt(actual_src_x, actual_src_y);
+
+                // Skip completely transparent pixels
+                if (src_pixel.a == 0) {
+                    continue;
+                }
+
+                // Apply color scaling and ensure proper alpha
+                var scaled_pixel = src_pixel;
+                if (opts.color_scale[0] != 1.0 or opts.color_scale[1] != 1.0 or opts.color_scale[2] != 1.0 or opts.color_scale[3] != 1.0) {
+                    scaled_pixel.r = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.r)) * opts.color_scale[0]));
+                    scaled_pixel.g = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.g)) * opts.color_scale[1]));
+                    scaled_pixel.b = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.b)) * opts.color_scale[2]));
+                    scaled_pixel.a = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.a)) * opts.color_scale[3]));
+                }
+
+                // Set destination pixel
+                dest.setRGBA(dest_x, dest_y, scaled_pixel);
             }
+        }
+    } else {
+        // Transform path: Use backward mapping to avoid gaps
+        // Calculate the bounding box of the transformed source in destination space
+        const corners = [_][2]f32{
+            .{ 0, 0 },
+            .{ @floatFromInt(src_width - 1), 0 },
+            .{ 0, @floatFromInt(src_height - 1) },
+            .{ @floatFromInt(src_width - 1), @floatFromInt(src_height - 1) },
+        };
 
-            // Get source pixel
-            const actual_src_x = src_start_x + src_x;
-            const actual_src_y = src_start_y + src_y;
-            const src_pixel = self.rgba_image.rgbaAt(actual_src_x, actual_src_y);
+        var min_x: f32 = std.math.floatMax(f32);
+        var max_x: f32 = -std.math.floatMax(f32);
+        var min_y: f32 = std.math.floatMax(f32);
+        var max_y: f32 = -std.math.floatMax(f32);
 
-            // Skip transparent pixels for better blending
-            if (src_pixel.a == 0) {
-                continue;
+        for (corners) |corner| {
+            const transformed = opts.geom.apply(corner[0], corner[1]);
+            min_x = @min(min_x, transformed.x);
+            max_x = @max(max_x, transformed.x);
+            min_y = @min(min_y, transformed.y);
+            max_y = @max(max_y, transformed.y);
+        }
+
+        const bbox_min_x = @max(@as(f32, @floatFromInt(dest_bounds.min.x)), min_x);
+        const bbox_max_x = @min(@as(f32, @floatFromInt(dest_bounds.max.x - 1)), max_x);
+        const bbox_min_y = @max(@as(f32, @floatFromInt(dest_bounds.min.y)), min_y);
+        const bbox_max_y = @min(@as(f32, @floatFromInt(dest_bounds.max.y - 1)), max_y);
+
+        // Sample the destination region and use inverse mapping
+        var dest_y = @as(i32, @intFromFloat(bbox_min_y));
+        const max_dest_y = @as(i32, @intFromFloat(bbox_max_y));
+        while (dest_y <= max_dest_y) : (dest_y += 1) {
+            var dest_x = @as(i32, @intFromFloat(bbox_min_x));
+            const max_dest_x = @as(i32, @intFromFloat(bbox_max_x));
+            while (dest_x <= max_dest_x) : (dest_x += 1) {
+                // Use inverse transformation to find source pixel
+                const src_coord = inverseTransform(&opts.geom, @floatFromInt(dest_x), @floatFromInt(dest_y));
+
+                // Check if the source coordinate is within bounds
+                if (src_coord.x >= 0 and src_coord.x < @as(f32, @floatFromInt(src_width)) and
+                    src_coord.y >= 0 and src_coord.y < @as(f32, @floatFromInt(src_height)))
+                {
+                    // Sample the source pixel (nearest neighbor for now)
+                    const src_x = @as(i32, @intFromFloat(@round(src_coord.x)));
+                    const src_y = @as(i32, @intFromFloat(@round(src_coord.y)));
+
+                    // Get source pixel
+                    const actual_src_x = src_start_x + src_x;
+                    const actual_src_y = src_start_y + (src_height - 1 - src_y); // Flip Y axis
+                    const src_pixel = self.rgba_image.rgbaAt(actual_src_x, actual_src_y);
+
+                    // Skip completely transparent pixels
+                    if (src_pixel.a == 0) {
+                        continue;
+                    }
+
+                    // Apply color scaling and ensure proper alpha
+                    var scaled_pixel = src_pixel;
+                    if (opts.color_scale[0] != 1.0 or opts.color_scale[1] != 1.0 or opts.color_scale[2] != 1.0 or opts.color_scale[3] != 1.0) {
+                        scaled_pixel.r = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.r)) * opts.color_scale[0]));
+                        scaled_pixel.g = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.g)) * opts.color_scale[1]));
+                        scaled_pixel.b = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.b)) * opts.color_scale[2]));
+                        scaled_pixel.a = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.a)) * opts.color_scale[3]));
+                    }
+
+                    // Set destination pixel
+                    dest.setRGBA(dest_x, dest_y, scaled_pixel);
+                }
             }
-
-            // Apply color scaling
-            var scaled_pixel = src_pixel;
-            scaled_pixel.r = @intFromFloat(@as(f32, @floatFromInt(src_pixel.r)) * opts.color_scale[0]);
-            scaled_pixel.g = @intFromFloat(@as(f32, @floatFromInt(src_pixel.g)) * opts.color_scale[1]);
-            scaled_pixel.b = @intFromFloat(@as(f32, @floatFromInt(src_pixel.b)) * opts.color_scale[2]);
-            scaled_pixel.a = @intFromFloat(@as(f32, @floatFromInt(src_pixel.a)) * opts.color_scale[3]);
-
-            // Set destination pixel
-            dest.setRGBA(dest_x, dest_y, scaled_pixel);
         }
     }
 }
 
+// Helper function to compute inverse transformation
+fn inverseTransform(geom: *const Geom, x: f32, y: f32) struct { x: f32, y: f32 } {
+    // For a 2D affine transformation matrix:
+    // [x']   [a  c  tx] [x]
+    // [y'] = [b  d  ty] [y]
+    // [1 ]   [0  0  1 ] [1]
+    //
+    // The inverse is:
+    // [x]   [d  -c  (c*ty - d*tx)] [x']
+    // [y] = [-b  a  (b*tx - a*ty)] [y']
+    // [1]   [0   0   (a*d - b*c) ] [1 ]
+    //
+    // Divided by the determinant (a*d - b*c)
+
+    const det = geom.a * geom.d - geom.b * geom.c;
+    if (@abs(det) < 1e-10) {
+        // Singular matrix, return original point
+        return .{ .x = x, .y = y };
+    }
+
+    const inv_det = 1.0 / det;
+
+    const tx_adj = x - geom.tx;
+    const ty_adj = y - geom.ty;
+
+    return .{
+        .x = (geom.d * tx_adj - geom.c * ty_adj) * inv_det,
+        .y = (-geom.b * tx_adj + geom.a * ty_adj) * inv_det,
+    };
+}
+
 pub fn setPixel(self: *Image, x: i32, y: i32, c: color.RGBA) void {
     self.rgba_image.setRGBA(x, y, c);
+}
+
+/// Fill the entire image with a solid color
+pub fn fill(self: *Image, c: color.RGBA) void {
+    const bounds = self.rgba_image.bounds();
+    var y: i32 = bounds.min.y;
+    while (y < bounds.max.y) : (y += 1) {
+        var x: i32 = bounds.min.x;
+        while (x < bounds.max.x) : (x += 1) {
+            self.rgba_image.setRGBA(x, y, c);
+        }
+    }
 }
 
 // WritePixels replaces the pixels at the specified region.

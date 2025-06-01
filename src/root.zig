@@ -5,6 +5,7 @@ const image = @import("image");
 pub const Game = @import("Game.zig");
 pub const InputState = @import("input_state.zig");
 pub const Image = @import("Image.zig").Image;
+pub const color = @import("color");
 
 const App = @import("App.zig");
 
@@ -134,11 +135,11 @@ pub fn run(
 }
 
 var buffer: [1024]u8 = undefined;
-pub fn print(comptime fmt: []const u8, args: anytype, x: f32, y: f32, color: [4]f32) !void {
+pub fn print(comptime fmt: []const u8, args: anytype, x: f32, y: f32, text_color: [4]f32) !void {
     if (app.graphics.printer) |*printer| {
         const message = try std.fmt.bufPrint(buffer[0..], fmt, args);
 
-        try printer.text(message, x, y, color);
+        try printer.text(message, x, y, text_color);
     } else {
         return error.PrinterNotEnabled;
     }
