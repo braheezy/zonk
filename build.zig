@@ -68,7 +68,7 @@ pub fn build(b: *std.Build) void {
     }
 
     // buildPong(b, target, optimize, zonk_mod, zpix);
-    // buildAnimation(b, target, optimize, zonk_mod, zpix);
+    buildAnimation(b, target, optimize, zonk_mod, zpix);
 
     const qoa_mod = b.createModule(.{
         .root_source_file = b.path("lib/qoa/qoa.zig"),

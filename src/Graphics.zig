@@ -1,6 +1,8 @@
 const std = @import("std");
 const zgpu = @import("zgpu");
 const RGBAImage = @import("image").RGBAImage;
+const Rectangle = @import("image").Rectangle;
+const Image = @import("Image.zig").Image;
 
 const App = @import("App.zig");
 const ResourceManager = @import("ResourceManager.zig");
@@ -12,6 +14,7 @@ pub const Graphics = @This();
 allocator: std.mem.Allocator,
 gfx: *zgpu.GraphicsContext,
 screen: RGBAImage,
+screen_image: *Image,
 screen_texture: zgpu.TextureHandle,
 screen_texture_view: zgpu.TextureViewHandle,
 screen_bind_group: zgpu.BindGroupHandle,
@@ -42,6 +45,7 @@ pub fn init(
         .allocator = allocator,
         .gfx = gfx,
         .screen = undefined,
+        .screen_image = undefined,
         .screen_texture = undefined,
         .screen_texture_view = undefined,
         .screen_bind_group = undefined,
@@ -59,6 +63,15 @@ pub fn init(
             .max = .{ .x = @as(i32, @intCast(width)), .y = @as(i32, @intCast(height)) },
         },
     );
+
+    // Create and initialize the screen image wrapper
+    graphics.screen_image = try allocator.create(Image);
+    graphics.screen_image.* = Image{
+        .rgba_image = graphics.screen,
+        .allocator = allocator,
+        .sub_bounds = null,
+        .owns_pixels = false,
+    };
 
     // Create the screen texture
     graphics.screen_texture = gfx.createTexture(.{
@@ -233,6 +246,7 @@ pub fn deinit(self: *Graphics) void {
         printer.deinit();
     }
     self.allocator.free(self.screen.pixels);
+    self.screen_image.deinit();
     self.allocator.free(self.padded_buffer);
     self.gfx.releaseResource(self.screen_texture);
     self.gfx.releaseResource(self.screen_texture_view);
@@ -261,6 +275,10 @@ pub fn enableTextRendering(self: *Graphics, dpr: u32) !void {
 
 pub fn getScreen(self: *Graphics) *RGBAImage {
     return &self.screen;
+}
+
+pub fn getScreenImage(self: *Graphics) *Image {
+    return self.screen_image;
 }
 
 // Add this new helper function for drawing the screen

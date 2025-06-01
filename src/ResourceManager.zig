@@ -463,24 +463,70 @@ pub fn computeTbnWithNormal(corners: [3]VertexAttr, expected_normal: [3]f32) zma
 /// Load an image from a file and return it as a Zonk Image
 pub fn loadImage(
     allocator: std.mem.Allocator,
-    _: *zgpu.GraphicsContext,
+    gfx: *zgpu.GraphicsContext,
     path: []const u8,
 ) !*Image {
+    _ = gfx;
+
+    // Use the same loading pattern as loadTexture
     const ext = std.fs.path.extension(path);
-    const loaded_image =
-        if (std.mem.eql(u8, ext, ".jpg") or std.mem.eql(u8, ext, ".jpeg"))
-            try jpeg.load(allocator, path)
-        else
-            try png.load(allocator, path);
+    var loaded_image = if (std.mem.eql(u8, ext, ".jpg") or std.mem.eql(u8, ext, ".jpeg"))
+        try jpeg.load(allocator, path)
+    else
+        try png.load(allocator, path);
+    defer loaded_image.free(allocator);
 
-    // Create our new Image
+    // Convert to RGBA format regardless of source format (like Ebiten's imageToBytes)
+    const rgba_image = try imageToRGBA(allocator, &loaded_image);
+
     const img = try allocator.create(Image);
-
-    // Initialize Image with the RGBAImage from the loaded image
     img.* = .{
-        .rgba_image = loaded_image,
+        .rgba_image = rgba_image,
         .allocator = allocator,
     };
 
     return img;
+}
+
+/// Convert any image format to RGBA (similar to Ebiten's imageToBytes)
+fn imageToRGBA(allocator: std.mem.Allocator, img: *img_module.Image) !img_module.RGBAImage {
+    const size = img.bounds().size();
+    const width = size.x;
+    const height = size.y;
+
+    switch (img.*) {
+        .RGBA => |rgba| {
+            // If it's already RGBA and the right size, we can use it directly
+            const expected_len = @as(usize, @intCast(width * height * 4));
+            if (rgba.pixels.len == expected_len) {
+                return rgba;
+            } else {
+                // Fall back to conversion
+                return imageToRGBASlow(allocator, img);
+            }
+        },
+        else => {
+            // For any other format (NRGBA, Paletted, etc.), convert to RGBA
+            return imageToRGBASlow(allocator, img);
+        },
+    }
+}
+
+/// Convert any image format to RGBA using slow but universal method
+fn imageToRGBASlow(allocator: std.mem.Allocator, img: *img_module.Image) !img_module.RGBAImage {
+    const size = img.bounds().size();
+    const width = size.x;
+    const height = size.y;
+
+    // Create a new RGBA image
+    var rgba_image = try img_module.RGBAImage.init(allocator, img_module.Rectangle{
+        .min = .{ .x = 0, .y = 0 },
+        .max = .{ .x = width, .y = height },
+    });
+
+    const pixels = try img.rgbaPixels(allocator);
+    defer allocator.free(pixels);
+    @memcpy(rgba_image.pixels[0..], pixels[0..]);
+
+    return rgba_image;
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 pub const zglfw = @import("zglfw");
 
+const image = @import("image");
 pub const Game = @import("Game.zig");
 pub const InputState = @import("input_state.zig");
 pub const Image = @import("Image.zig").Image;
@@ -90,8 +91,9 @@ pub fn run(
             }
 
             // Layout and draw
-            game.layout(app.width, app.height);
-            game.draw(app.graphics.getScreen());
+            const layout_dim = game.layout(app.width, app.height);
+            _ = layout_dim; // Use the layout dimensions if needed
+            game.draw(app.graphics.getScreenImage());
             try app.graphics.render();
         }
 
@@ -140,4 +142,54 @@ pub fn print(comptime fmt: []const u8, args: anytype, x: f32, y: f32, color: [4]
     } else {
         return error.PrinterNotEnabled;
     }
+}
+
+pub fn newImageFromImage(allocator: std.mem.Allocator, img: *image.Image) !*Image {
+    const size = img.bounds().size();
+    const zonk_image = try Image.init(allocator, size.x, size.y);
+
+    const bytes = try imageToBytes(allocator, img);
+    const region = image.Rectangle{
+        .min = .{ .x = 0, .y = 0 },
+        .max = .{ .x = size.x, .y = size.y },
+    };
+    try zonk_image.writePixels(bytes, region);
+    return zonk_image;
+}
+
+fn imageToBytes(allocator: std.mem.Allocator, img: *image.Image) ![]u8 {
+    const size = img.bounds().size();
+    const width = size.x;
+    const height = size.y;
+
+    switch (img.*) {
+        .RGBA => |i| {
+            if (i.pixels.len == width * height * 4) {
+                return i.pixels;
+            } else {
+                return imageToBytesSlow(allocator, img);
+            }
+        },
+        else => {
+            return imageToBytesSlow(allocator, img);
+        },
+    }
+}
+
+fn imageToBytesSlow(allocator: std.mem.Allocator, img: *image.Image) ![]u8 {
+    const size = img.bounds().size();
+    const width = size.x;
+    const height = size.y;
+    const pixel_buffer = try allocator.alloc(u8, @as(usize, @intCast(width * height * 4)));
+    const dst_img = &image.RGBAImage{
+        .pixels = pixel_buffer,
+        .stride = width * 4,
+        .rect = .{
+            .min = .{ .x = 0, .y = 0 },
+            .max = .{ .x = width, .y = height },
+        },
+    };
+
+    image.draw(img, dst_img);
+    return pixel_buffer;
 }
