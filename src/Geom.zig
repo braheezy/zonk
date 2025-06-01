@@ -1,6 +1,5 @@
 const std = @import("std");
 
-/// Geometry transformation matrix similar to Ebiten's GeoM
 /// Represents a 2D affine transformation matrix:
 /// | a  c  tx |
 /// | b  d  ty |
@@ -24,14 +23,24 @@ pub fn reset(self: *Geom) void {
     self.ty = 0.0;
 }
 
-/// Apply translation
+/// Apply translation by concatenating with a translation matrix
 pub fn translate(self: *Geom, dx: f32, dy: f32) void {
-    self.tx += dx;
-    self.ty += dy;
+    // Translation matrix concatenation:
+    // [a  c  tx]   [1  0  dx]   [a  c  a*dx + c*dy + tx]
+    // [b  d  ty] * [0  1  dy] = [b  d  b*dx + d*dy + ty]
+    // [0  0  1 ]   [0  0  1 ]   [0  0  1              ]
+
+    self.tx = self.a * dx + self.c * dy + self.tx;
+    self.ty = self.b * dx + self.d * dy + self.ty;
 }
 
-/// Apply scaling
+/// Apply scaling by concatenating with a scale matrix
 pub fn scale(self: *Geom, sx: f32, sy: f32) void {
+    // Scale matrix concatenation:
+    // [a  c  tx]   [sx 0  0]   [a*sx  c*sy  tx]
+    // [b  d  ty] * [0  sy 0] = [b*sx  d*sy  ty]
+    // [0  0  1 ]   [0  0  1]   [0     0     1 ]
+
     self.a *= sx;
     self.b *= sx;
     self.c *= sy;

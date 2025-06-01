@@ -41,24 +41,24 @@ game: ?Game = null,
 width: u32,
 height: u32,
 
-pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
+pub fn init(allocator: std.mem.Allocator, window_config: GameConfig, screen_config: GameConfig) !*App {
     std.debug.print("App.init - initializing GLFW\n", .{});
     try zglfw.init();
 
-    // Create window
+    // Create window with window_config dimensions
     zglfw.windowHint(.client_api, .no_api);
     zglfw.windowHint(.resizable, false);
-    const title_sentinel = std.fmt.allocPrintZ(allocator, "{s}", .{config.title}) catch unreachable;
+    const title_sentinel = std.fmt.allocPrintZ(allocator, "{s}", .{window_config.title}) catch unreachable;
     defer allocator.free(title_sentinel);
     const window = try zglfw.createWindow(
-        @intCast(config.width),
-        @intCast(config.height),
+        @intCast(window_config.width),
+        @intCast(window_config.height),
         title_sentinel,
         null,
     );
     std.debug.print("App.init - window created\n", .{});
 
-    // Create app instance
+    // Create app instance with window dimensions
     const app = try allocator.create(App);
     app.* = .{
         .allocator = allocator,
@@ -67,8 +67,8 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
         .input = try InputState.init(allocator),
         .delta_time = 0,
         .total_time = 0,
-        .width = config.width,
-        .height = config.height,
+        .width = window_config.width,
+        .height = window_config.height,
     };
 
     std.debug.print("App.init - creating graphics context\n", .{});
@@ -99,15 +99,15 @@ pub fn init(allocator: std.mem.Allocator, config: GameConfig) !*App {
         },
     });
 
-    // Initialize graphics system
+    // Initialize graphics system with screen_config dimensions (logical screen size)
     app.graphics = try Graphics.init(
         gfx,
         allocator,
-        config.width,
-        config.height,
+        screen_config.width,
+        screen_config.height,
     );
 
-    if (config.enable_text_rendering) {
+    if (window_config.enable_text_rendering) {
         try enableTextRendering(app);
     }
 

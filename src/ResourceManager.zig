@@ -476,7 +476,7 @@ pub fn loadImage(
         try png.load(allocator, path);
     defer loaded_image.free(allocator);
 
-    // Convert to RGBA format regardless of source format (like Ebiten's imageToBytes)
+    // Convert to RGBA format regardless of source format
     const rgba_image = try imageToRGBA(allocator, &loaded_image);
 
     const img = try allocator.create(Image);
@@ -488,7 +488,7 @@ pub fn loadImage(
     return img;
 }
 
-/// Convert any image format to RGBA (similar to Ebiten's imageToBytes)
+/// Convert any image format to RGBA
 fn imageToRGBA(allocator: std.mem.Allocator, img: *img_module.Image) !img_module.RGBAImage {
     const size = img.bounds().size();
     const width = size.x;

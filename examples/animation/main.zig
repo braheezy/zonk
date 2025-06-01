@@ -47,11 +47,11 @@ pub fn layout(self: *AnimationGame, width: usize, height: usize) zonk.Game.Layou
 }
 
 pub fn draw(self: *AnimationGame, screen: *Image) void {
-    // Clear screen first (like Ebiten does automatically)
+    // Clear screen first
     screen.fill(color.RGBA{ .r = 0x80, .g = 0x80, .b = 0xc0, .a = 0xff });
 
     if (self.runner_image) |runner| {
-        // Calculate which frame to show (same as Ebiten reference)
+        // Calculate which frame to show
         const frame_index = @rem(@divTrunc(self.count, 5), frame_count);
         const sx = frame_ox + frame_index * frame_width;
         const sy = frame_oy;
@@ -63,20 +63,14 @@ pub fn draw(self: *AnimationGame, screen: *Image) void {
         }) catch return;
         defer frame_image.deinit();
 
-        // Set up drawing options with transformation (matching Ebiten reference)
         var draw_opts = Image.DrawImageOptions{};
 
-        // Scale up by 3x for better visibility (apply scaling first)
-        draw_opts.geom.scale(3.0, 3.0);
-
-        // First translate to center the sprite (move origin to center of sprite)
+        // translate to center sprite, then translate to screen center
         draw_opts.geom.translate(-@as(f32, @floatFromInt(frame_width)) / 2.0, -@as(f32, @floatFromInt(frame_height)) / 2.0);
-
-        // Then translate to center of screen
         draw_opts.geom.translate(@as(f32, @floatFromInt(screen_width)) / 2.0, @as(f32, @floatFromInt(screen_height)) / 2.0);
 
-        // Draw the frame to the screen using Ebiten-style API
-        screen.draw(frame_image, draw_opts);
+        // Draw the frame to the screen
+        screen.drawImage(frame_image, draw_opts);
     }
 }
 

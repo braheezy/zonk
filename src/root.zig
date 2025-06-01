@@ -45,7 +45,21 @@ pub fn run(
     allocator: std.mem.Allocator,
     config: GameConfig,
 ) !void {
-    app = try App.init(allocator, config);
+    // Initialize the game to get layout dimensions first
+    var temp_game = Game.init(T, instance);
+    const screen_layout = temp_game.layout(config.width, config.height);
+
+    // Create config with layout dimensions for screen buffer
+    const screen_config = GameConfig{
+        .title = config.title,
+        .width = @as(u32, @intCast(screen_layout.width)),
+        .height = @as(u32, @intCast(screen_layout.height)),
+        .vsync = config.vsync,
+        .uncapped_fps = config.uncapped_fps,
+        .enable_text_rendering = config.enable_text_rendering,
+    };
+
+    app = try App.init(allocator, config, screen_config);
     defer app.deinit();
 
     app.game = Game.init(T, instance);
@@ -94,7 +108,8 @@ pub fn run(
             // Layout and draw
             const layout_dim = game.layout(app.width, app.height);
             _ = layout_dim; // Use the layout dimensions if needed
-            game.draw(app.graphics.getScreenImage());
+            const screen = app.graphics.getScreenImage();
+            game.draw(screen);
             try app.graphics.render();
         }
 

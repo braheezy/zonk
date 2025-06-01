@@ -76,11 +76,6 @@ pub fn subImage(self: *Image, rect: Rectangle) !*Image {
     return sub_image;
 }
 
-/// Draw a source image onto this image (Ebiten-style API)
-pub fn draw(self: *Image, source: *Image, options: ?DrawImageOptions) void {
-    source.drawToDestination(&self.rgba_image, options);
-}
-
 /// Draw a source image onto this image (alternative name for compatibility)
 pub fn drawImage(self: *Image, source: *Image, options: ?DrawImageOptions) void {
     source.drawToDestination(&self.rgba_image, options);
