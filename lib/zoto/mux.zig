@@ -71,6 +71,14 @@ pub const Mux = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
+        // Check if player is already in the list to prevent duplicates
+        for (self.players.items) |p| {
+            if (p == player) {
+                // Player is already in the list, don't add it again
+                return;
+            }
+        }
+
         try self.players.append(player);
         self.condition.signal();
     }

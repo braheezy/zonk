@@ -5,6 +5,10 @@ const zoto = @import("zoto");
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
+const freq_c = 523.3;
+const freq_e = 659.3;
+const freq_g = 784.0;
+
 pub fn main() !void {
     // Memory allocation setup
     const allocator, const is_debug = gpa: {
@@ -40,10 +44,9 @@ pub fn main() !void {
 
     context.waitForReady();
 
-    const freq = 523.3; // C note (more audible)
     const duration = 6 * std.time.ns_per_s; // 6 seconds total
 
-    try playWithPauseResume(allocator, context, freq, duration, options.channel_count, options.format, @intCast(options.sample_rate));
+    try playWithPauseResume(allocator, context, freq_c, duration, options.channel_count, options.format, @intCast(options.sample_rate));
 
     std.debug.print("Done!\n", .{});
 }
@@ -90,7 +93,7 @@ fn playWithPauseResume(
 
     // Pause the audio using the context
     std.debug.print("⏸️  Pausing playback...\n", .{});
-    try ctx.pause();
+    player.pause();
 
     // Wait for pause to take effect
     std.time.sleep(std.time.ns_per_ms * 100);
@@ -103,7 +106,7 @@ fn playWithPauseResume(
 
     // Resume playback using the context
     std.debug.print("▶️  Resuming playback...\n", .{});
-    try ctx.play();
+    try player.play();
 
     // Wait for resume to take effect
     std.time.sleep(std.time.ns_per_ms * 100);
