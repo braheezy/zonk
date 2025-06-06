@@ -71,9 +71,13 @@ pub fn build(b: *std.Build) void {
     const zoto_dep = b.dependency("zoto", .{});
     const zoto_mod = zoto_dep.module("zoto");
 
+    const macos_dep = b.dependency("macos", .{});
+    zoto_mod.linkLibrary(macos_dep.artifact("macos"));
+
     // buildPong(b, target, optimize, zonk_mod, zpix);
     buildAnimation(b, target, optimize, zonk_mod, zpix);
     buildSine(b, target, optimize, zoto_mod);
+    buildQoaplay(b, target, optimize, zoto_mod);
 }
 
 fn buildPong(
@@ -164,7 +168,32 @@ fn buildSine(
     const run_sineplay = b.addRunArtifact(sine_exe);
     const run_sineplay_step = b.step("sine", "Run the sine audio example");
     run_sineplay_step.dependOn(&run_sineplay.step);
+}
 
-    const macos_dep = b.dependency("macos", .{});
-    sine_exe.linkLibrary(macos_dep.artifact("macos"));
+fn buildQoaplay(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    zoto_mod: *std.Build.Module,
+) void {
+    const qoa_mod = b.createModule(.{
+        .root_source_file = b.path("lib/qoa/qoa.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const qoaplay_mod = b.createModule(.{
+        .root_source_file = b.path("examples/qoaplay/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    qoaplay_mod.addImport("qoa", qoa_mod);
+    qoaplay_mod.addImport("zoto", zoto_mod);
+    const qoaplay_exe = b.addExecutable(.{
+        .root_module = qoaplay_mod,
+        .name = "qoaplay",
+    });
+    b.installArtifact(qoaplay_exe);
+    const run_qoaplay = b.addRunArtifact(qoaplay_exe);
+    const run_qoaplay_step = b.step("qoaplay", "Run the qoaplay example");
+    run_qoaplay_step.dependOn(&run_qoaplay.step);
 }

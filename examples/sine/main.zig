@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const qoa = @import("qoa");
 const zoto = @import("zoto");
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -21,7 +20,7 @@ pub fn main() !void {
     defer {
         if (is_debug) {
             if (debug_allocator.deinit() == .leak) {
-                std.process.exit(0);
+                std.process.exit(1);
             }
         }
     }
