@@ -4,6 +4,7 @@ const Rectangle = @import("image").Rectangle;
 const zgpu = @import("zgpu");
 const ResourceManager = @import("ResourceManager.zig");
 const Geom = @import("Geom.zig");
+const ColorScale = @import("ColorScale.zig");
 const color = @import("color");
 
 /// Represents a 2D image in the Zonk engine
@@ -20,8 +21,8 @@ owns_pixels: bool = true,
 
 /// Options for drawing images
 pub const DrawImageOptions = struct {
-    geom: Geom = Geom{},
-    color_scale: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
+    geom: Geom = .{},
+    color_scale: ColorScale = .{},
 };
 
 /// Create a new image with the given dimensions
@@ -42,10 +43,9 @@ pub fn init(allocator: std.mem.Allocator, width: i32, height: i32) !*Image {
 }
 
 /// Load an image from a file path
-pub fn fromFile(allocator: std.mem.Allocator, gfx: *zgpu.GraphicsContext, path: []const u8) !*Image {
+pub fn fromFile(allocator: std.mem.Allocator, path: []const u8) !*Image {
     const image = try ResourceManager.loadImage(
         allocator,
-        gfx,
         path,
     );
     return image;
@@ -114,9 +114,9 @@ pub fn drawToDestination(self: *Image, dest: *RGBAImage, options: ?DrawImageOpti
                     continue;
                 }
 
-                // Get source pixel
+                // Get source pixel - flip Y axis for correct orientation
                 const actual_src_x = src_start_x + src_x;
-                const actual_src_y = src_start_y + (src_height - 1 - src_y); // Flip Y axis
+                const actual_src_y = src_start_y + (src_height - 1 - src_y);
                 const src_pixel = self.rgba_image.rgbaAt(actual_src_x, actual_src_y);
 
                 // Skip completely transparent pixels
@@ -124,17 +124,40 @@ pub fn drawToDestination(self: *Image, dest: *RGBAImage, options: ?DrawImageOpti
                     continue;
                 }
 
-                // Apply color scaling and ensure proper alpha
+                // Apply color scaling if needed
                 var scaled_pixel = src_pixel;
-                if (opts.color_scale[0] != 1.0 or opts.color_scale[1] != 1.0 or opts.color_scale[2] != 1.0 or opts.color_scale[3] != 1.0) {
-                    scaled_pixel.r = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.r)) * opts.color_scale[0]));
-                    scaled_pixel.g = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.g)) * opts.color_scale[1]));
-                    scaled_pixel.b = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.b)) * opts.color_scale[2]));
-                    scaled_pixel.a = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.a)) * opts.color_scale[3]));
+                if (opts.color_scale.r != 1.0 or opts.color_scale.g != 1.0 or opts.color_scale.b != 1.0 or opts.color_scale.a != 1.0) {
+                    scaled_pixel.r = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.r)) * opts.color_scale.r));
+                    scaled_pixel.g = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.g)) * opts.color_scale.g));
+                    scaled_pixel.b = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.b)) * opts.color_scale.b));
+                    scaled_pixel.a = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.a)) * opts.color_scale.a));
                 }
 
-                // Set destination pixel
-                dest.setRGBA(dest_x, dest_y, scaled_pixel);
+                // Alpha blend with destination pixel
+                if (scaled_pixel.a == 255) {
+                    // Fully opaque, just overwrite
+                    dest.setRGBA(dest_x, dest_y, scaled_pixel);
+                } else if (scaled_pixel.a > 0) {
+                    // Alpha blend: result = src * alpha + dst * (1 - alpha)
+                    const dst_pixel = dest.rgbaAt(dest_x, dest_y);
+                    const src_alpha = @as(f32, @floatFromInt(scaled_pixel.a)) / 255.0;
+                    const inv_alpha = 1.0 - src_alpha;
+
+                    const blended_r = @as(f32, @floatFromInt(scaled_pixel.r)) * src_alpha + @as(f32, @floatFromInt(dst_pixel.r)) * inv_alpha;
+                    const blended_g = @as(f32, @floatFromInt(scaled_pixel.g)) * src_alpha + @as(f32, @floatFromInt(dst_pixel.g)) * inv_alpha;
+                    const blended_b = @as(f32, @floatFromInt(scaled_pixel.b)) * src_alpha + @as(f32, @floatFromInt(dst_pixel.b)) * inv_alpha;
+                    const blended_a = @as(f32, @floatFromInt(scaled_pixel.a)) + @as(f32, @floatFromInt(dst_pixel.a)) * inv_alpha;
+
+                    const result_pixel = color.RGBA{
+                        .r = @intFromFloat(@min(255.0, blended_r)),
+                        .g = @intFromFloat(@min(255.0, blended_g)),
+                        .b = @intFromFloat(@min(255.0, blended_b)),
+                        .a = @intFromFloat(@min(255.0, blended_a)),
+                    };
+
+                    dest.setRGBA(dest_x, dest_y, result_pixel);
+                }
+                // Skip completely transparent pixels (a == 0)
             }
         }
     } else {
@@ -183,9 +206,9 @@ pub fn drawToDestination(self: *Image, dest: *RGBAImage, options: ?DrawImageOpti
                     const src_x = @as(i32, @intFromFloat(@round(src_coord.x)));
                     const src_y = @as(i32, @intFromFloat(@round(src_coord.y)));
 
-                    // Get source pixel
+                    // Get source pixel - flip Y axis for correct orientation
                     const actual_src_x = src_start_x + src_x;
-                    const actual_src_y = src_start_y + (src_height - 1 - src_y); // Flip Y axis
+                    const actual_src_y = src_start_y + (src_height - 1 - src_y);
                     const src_pixel = self.rgba_image.rgbaAt(actual_src_x, actual_src_y);
 
                     // Skip completely transparent pixels
@@ -193,17 +216,40 @@ pub fn drawToDestination(self: *Image, dest: *RGBAImage, options: ?DrawImageOpti
                         continue;
                     }
 
-                    // Apply color scaling and ensure proper alpha
+                    // Apply color scaling if needed
                     var scaled_pixel = src_pixel;
-                    if (opts.color_scale[0] != 1.0 or opts.color_scale[1] != 1.0 or opts.color_scale[2] != 1.0 or opts.color_scale[3] != 1.0) {
-                        scaled_pixel.r = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.r)) * opts.color_scale[0]));
-                        scaled_pixel.g = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.g)) * opts.color_scale[1]));
-                        scaled_pixel.b = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.b)) * opts.color_scale[2]));
-                        scaled_pixel.a = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.a)) * opts.color_scale[3]));
+                    if (opts.color_scale.r != 1.0 or opts.color_scale.g != 1.0 or opts.color_scale.b != 1.0 or opts.color_scale.a != 1.0) {
+                        scaled_pixel.r = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.r)) * opts.color_scale.r));
+                        scaled_pixel.g = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.g)) * opts.color_scale.g));
+                        scaled_pixel.b = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.b)) * opts.color_scale.b));
+                        scaled_pixel.a = @intFromFloat(@min(255.0, @as(f32, @floatFromInt(src_pixel.a)) * opts.color_scale.a));
                     }
 
-                    // Set destination pixel
-                    dest.setRGBA(dest_x, dest_y, scaled_pixel);
+                    // Alpha blend with destination pixel
+                    if (scaled_pixel.a == 255) {
+                        // Fully opaque, just overwrite
+                        dest.setRGBA(dest_x, dest_y, scaled_pixel);
+                    } else if (scaled_pixel.a > 0) {
+                        // Alpha blend: result = src * alpha + dst * (1 - alpha)
+                        const dst_pixel = dest.rgbaAt(dest_x, dest_y);
+                        const src_alpha = @as(f32, @floatFromInt(scaled_pixel.a)) / 255.0;
+                        const inv_alpha = 1.0 - src_alpha;
+
+                        const blended_r = @as(f32, @floatFromInt(scaled_pixel.r)) * src_alpha + @as(f32, @floatFromInt(dst_pixel.r)) * inv_alpha;
+                        const blended_g = @as(f32, @floatFromInt(scaled_pixel.g)) * src_alpha + @as(f32, @floatFromInt(dst_pixel.g)) * inv_alpha;
+                        const blended_b = @as(f32, @floatFromInt(scaled_pixel.b)) * src_alpha + @as(f32, @floatFromInt(dst_pixel.b)) * inv_alpha;
+                        const blended_a = @as(f32, @floatFromInt(scaled_pixel.a)) + @as(f32, @floatFromInt(dst_pixel.a)) * inv_alpha;
+
+                        const result_pixel = color.RGBA{
+                            .r = @intFromFloat(@min(255.0, blended_r)),
+                            .g = @intFromFloat(@min(255.0, blended_g)),
+                            .b = @intFromFloat(@min(255.0, blended_b)),
+                            .a = @intFromFloat(@min(255.0, blended_a)),
+                        };
+
+                        dest.setRGBA(dest_x, dest_y, result_pixel);
+                    }
+                    // Skip completely transparent pixels (a == 0)
                 }
             }
         }
@@ -281,5 +327,5 @@ pub fn writePixels(self: *Image, pixels: []u8, region: Rectangle) !void {
 
 /// Draw this image directly to the screen
 pub fn drawToScreen(self: *Image, screen: *RGBAImage, options: ?DrawImageOptions) void {
-    self.draw(screen, options);
+    self.drawToDestination(screen, options);
 }

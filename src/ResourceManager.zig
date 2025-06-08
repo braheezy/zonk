@@ -463,11 +463,8 @@ pub fn computeTbnWithNormal(corners: [3]VertexAttr, expected_normal: [3]f32) zma
 /// Load an image from a file and return it as a Zonk Image
 pub fn loadImage(
     allocator: std.mem.Allocator,
-    gfx: *zgpu.GraphicsContext,
     path: []const u8,
 ) !*Image {
-    _ = gfx;
-
     // Use the same loading pattern as loadTexture
     const ext = std.fs.path.extension(path);
     var loaded_image = if (std.mem.eql(u8, ext, ".jpg") or std.mem.eql(u8, ext, ".jpeg"))
@@ -490,26 +487,8 @@ pub fn loadImage(
 
 /// Convert any image format to RGBA
 fn imageToRGBA(allocator: std.mem.Allocator, img: *img_module.Image) !img_module.RGBAImage {
-    const size = img.bounds().size();
-    const width = size.x;
-    const height = size.y;
-
-    switch (img.*) {
-        .RGBA => |rgba| {
-            // If it's already RGBA and the right size, we can use it directly
-            const expected_len = @as(usize, @intCast(width * height * 4));
-            if (rgba.pixels.len == expected_len) {
-                return rgba;
-            } else {
-                // Fall back to conversion
-                return imageToRGBASlow(allocator, img);
-            }
-        },
-        else => {
-            // For any other format (NRGBA, Paletted, etc.), convert to RGBA
-            return imageToRGBASlow(allocator, img);
-        },
-    }
+    // Always use the slow method to ensure we own our own copy of the pixels
+    return imageToRGBASlow(allocator, img);
 }
 
 /// Convert any image format to RGBA using slow but universal method

@@ -18,10 +18,13 @@ count: i32 = 0,
 runner_image: ?*Image = null,
 allocator: std.mem.Allocator,
 
-pub fn init(allocator: std.mem.Allocator) AnimationGame {
-    return AnimationGame{
+pub fn init(allocator: std.mem.Allocator) !AnimationGame {
+    const game = AnimationGame{
         .allocator = allocator,
+        .runner_image = try Image.fromFile(allocator, "examples/animation/runner.png"),
     };
+
+    return game;
 }
 
 pub fn deinit(self: *AnimationGame) void {
@@ -30,19 +33,11 @@ pub fn deinit(self: *AnimationGame) void {
     }
 }
 
-pub fn start(self: *AnimationGame) !void {
-    // Load the runner sprite sheet
-    self.runner_image = try Image.fromFile(self.allocator, undefined, "examples/animation/runner.png");
-}
-
 pub fn update(self: *AnimationGame) void {
     self.count += 1;
 }
 
-pub fn layout(self: *AnimationGame, width: usize, height: usize) zonk.Game.LayoutDim {
-    _ = self;
-    _ = width;
-    _ = height;
+pub fn layout(_: *AnimationGame, _: usize, _: usize) zonk.Game.LayoutDim {
     return .{ .width = screen_width, .height = screen_height };
 }
 
@@ -79,10 +74,8 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var game = AnimationGame.init(allocator);
+    var game = try AnimationGame.init(allocator);
     defer game.deinit();
-
-    try game.start();
 
     const config = zonk.GameConfig{
         .title = "Animation Example",

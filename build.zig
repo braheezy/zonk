@@ -68,6 +68,8 @@ pub fn build(b: *std.Build) void {
         zonk_mod.linkLibrary(zgpu.artifact("zdawn"));
     }
 
+    addLibraryPathsTo(b, zonk_mod);
+
     const zoto_dep = b.dependency("zoto", .{});
     const zoto_mod = zoto_dep.module("zoto");
 
@@ -78,6 +80,41 @@ pub fn build(b: *std.Build) void {
     buildAnimation(b, target, optimize, zonk_mod, zpix);
     buildSine(b, target, optimize, zoto_mod);
     buildQoaplay(b, target, optimize, zoto_mod);
+    buildBlur(b, target, optimize, zonk_mod);
+}
+
+fn addLibraryPathsTo(b: *std.Build, module: *std.Build.Module) void {
+    const target = module.resolved_target.?.result;
+    switch (target.os.tag) {
+        .windows => {
+            if (b.lazyDependency("dawn_x86_64_windows_gnu", .{})) |dawn_prebuilt| {
+                module.addLibraryPath(dawn_prebuilt.path(""));
+            }
+        },
+        .linux => {
+            if (target.cpu.arch.isX86()) {
+                if (b.lazyDependency("dawn_x86_64_linux_gnu", .{})) |dawn_prebuilt| {
+                    module.addLibraryPath(dawn_prebuilt.path(""));
+                }
+            } else if (target.cpu.arch.isAARCH64()) {
+                if (b.lazyDependency("dawn_aarch64_linux_gnu", .{})) |dawn_prebuilt| {
+                    module.addLibraryPath(dawn_prebuilt.path(""));
+                }
+            }
+        },
+        .macos => {
+            if (target.cpu.arch.isX86()) {
+                if (b.lazyDependency("dawn_x86_64_macos", .{})) |dawn_prebuilt| {
+                    module.addLibraryPath(dawn_prebuilt.path(""));
+                }
+            } else if (target.cpu.arch.isAARCH64()) {
+                if (b.lazyDependency("dawn_aarch64_macos", .{})) |dawn_prebuilt| {
+                    module.addLibraryPath(dawn_prebuilt.path(""));
+                }
+            }
+        },
+        else => {},
+    }
 }
 
 fn buildPong(
@@ -196,4 +233,26 @@ fn buildQoaplay(
     const run_qoaplay = b.addRunArtifact(qoaplay_exe);
     const run_qoaplay_step = b.step("qoaplay", "Run the qoaplay example");
     run_qoaplay_step.dependOn(&run_qoaplay.step);
+}
+
+fn buildBlur(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    zonk_mod: *std.Build.Module,
+) void {
+    const blur_mod = b.createModule(.{
+        .root_source_file = b.path("examples/blur/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    blur_mod.addImport("zonk", zonk_mod);
+    const blur_exe = b.addExecutable(.{
+        .root_module = blur_mod,
+        .name = "blur",
+    });
+    b.installArtifact(blur_exe);
+    const run_blur = b.addRunArtifact(blur_exe);
+    const run_blur_step = b.step("blur", "Run the blur example");
+    run_blur_step.dependOn(&run_blur.step);
 }
