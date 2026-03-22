@@ -38,7 +38,7 @@ pub const GlyphInfo = struct {
     height: i32,
     bearing_x: i32, // Offset from the left edge of the bitmap to where the glyph starts (in px).
     bearing_y: i32,
-    pixel_mode: ft.PixelMode,
+    pixel_mode: u8,
 };
 
 var last_step: i128 = 0;
@@ -58,8 +58,9 @@ pub const Font = struct {
 
     pub fn init(allocator: Allocator, ft_lib: *ft.Library, data: []const u8) !Font {
         const ft_face = try ft_lib.initMemoryFace(data, 0);
-        const hb_face = hb.Face.fromFreetypeFace(ft_face);
+        const hb_face = try hb.freetype.createFace(ft_face.handle);
         const hb_font = try hb.Font.create(hb_face);
+        hb.freetype.setFontFuncs(hb_font);
         return Font{
             .ft_face = ft_face,
             .hb_face = hb_face,
@@ -93,7 +94,7 @@ pub const Library = struct {
         // Only initialize Latin font
         var fonts = try allocator.alloc(Font, 1);
         fonts[0] = try Font.init(allocator, &ft_lib, latin);
-        try fonts[0].ft_face.setPixelSizes(0, font_size * dpr);
+        try fonts[0].ft_face.setCharSize(0, font_size * @as(i32, @intCast(dpr)) * 64, 0, 0);
         const hb_font_size: i32 = font_size * @as(i32, @intCast(dpr)) * 64;
         fonts[0].hb_font.setScale(@intCast(hb_font_size), @intCast(hb_font_size));
         fonts[0].glyphs = GlyphMap.init(allocator);
@@ -114,7 +115,7 @@ pub const Library = struct {
         const new_len = self.fonts.len + 1;
         self.fonts = try self.allocator.realloc(self.fonts, new_len);
         self.fonts[new_len - 1] = try Font.init(self.allocator, &self.ft_lib, font_data);
-        try self.fonts[new_len - 1].ft_face.setPixelSizes(0, font_size * self.dpr);
+        try self.fonts[new_len - 1].ft_face.setCharSize(0, font_size * @as(i32, @intCast(self.dpr)) * 64, 0, 0);
         const hb_font_size: i32 = font_size * @as(i32, @intCast(self.dpr)) * 64;
         self.fonts[new_len - 1].hb_font.setScale(@intCast(hb_font_size), @intCast(hb_font_size));
         self.fonts[new_len - 1].glyphs = GlyphMap.init(self.allocator);
@@ -152,6 +153,7 @@ pub const Library = struct {
     pub fn deinit(self: *Library) void {
         for (self.fonts) |*font| {
             font.hb_font.destroy();
+            font.hb_face.destroy();
             font.ft_face.deinit();
             font.glyphs.deinit();
         }
@@ -168,7 +170,7 @@ pub fn shape(allocator: Allocator, fonts: []Font, value: []const u8, max_width: 
     const ranges = try getRanges(allocator, value);
     defer allocator.free(ranges);
 
-    var shapes = std.ArrayList(GlyphShape).init(allocator);
+    var shapes = std.ArrayList(GlyphShape).empty;
     var cursor_x: i32 = 0;
     var cursor_y: i32 = 0;
 
@@ -189,7 +191,7 @@ pub fn shape(allocator: Allocator, fonts: []Font, value: []const u8, max_width: 
             continue;
         };
 
-        fonts[fontId].hb_font.shape(buffer, null);
+        hb.shape(fonts[fontId].hb_font, buffer, null);
 
         const infos = buffer.getGlyphInfos();
         const positions = buffer.getGlyphPositions() orelse return error.OutOfMemory;
@@ -201,7 +203,7 @@ pub fn shape(allocator: Allocator, fonts: []Font, value: []const u8, max_width: 
                 continue;
             };
 
-            try shapes.append(GlyphShape{
+            try shapes.append(allocator, GlyphShape{
                 .x = cursor_x + (pos.x_offset >> 6) + glyph.bearing_x,
                 .y = cursor_y + (pos.y_offset >> 6) - glyph.bearing_y,
                 .glyph = glyph,
@@ -211,7 +213,7 @@ pub fn shape(allocator: Allocator, fonts: []Font, value: []const u8, max_width: 
         }
     }
     // std.debug.print("\n", .{});
-    return shapes.toOwnedSlice();
+    return shapes.toOwnedSlice(allocator);
 }
 
 /// Map Unicode codepoint to HarfBuzz script that will be used for shaping.
@@ -255,8 +257,8 @@ fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, b
     logTime("Before init");
     var all_characters_len: u64 = 0;
     for (fonts) |f| {
-        const count = f.ft_face.numGlyphs();
-        std.debug.print("{s} ({d})\n", .{ f.ft_face.familyName() orelse "Unknown", count });
+        const count = faceNumGlyphs(f.ft_face);
+        std.debug.print("{s} ({d})\n", .{ faceFamilyName(f.ft_face), count });
         all_characters_len += count;
     }
 
@@ -269,7 +271,7 @@ fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, b
     var i: u32 = 0;
     std.debug.print("num of fonts: {d}\n", .{fonts.len});
     for (fonts) |f| {
-        const num_glyphs = f.ft_face.numGlyphs();
+        const num_glyphs = faceNumGlyphs(f.ft_face);
         for (0..num_glyphs) |j| {
             // For regular font it's not necessary to render the glyph to get size but for OT SVG it is.
             f.ft_face.loadGlyph(@intCast(j), .{
@@ -279,10 +281,10 @@ fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, b
                 std.debug.print("Error loading glyph {d}, {d}\n", .{ j, i });
                 return err;
             };
-            const ft_glyph = f.ft_face.glyph();
-            const ft_bitmap = ft_glyph.bitmap();
-            const w = ft_bitmap.width();
-            const h = ft_bitmap.rows();
+            const ft_glyph = f.ft_face.handle.*.glyph;
+            const ft_bitmap = ft_glyph.*.bitmap;
+            const w: usize = @intCast(ft_bitmap.width);
+            const h: usize = @intCast(ft_bitmap.rows);
 
             sizes[i] = if (w == 0 or h == 0) .{ 0, 0 } else .{
                 @intCast(w + MARGIN_PX * 2),
@@ -315,23 +317,23 @@ fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, b
     // Once positions are known, we can generate the glyphs mapping and bitmap.
     i = 0;
     for (fonts) |*f| {
-        for (0..f.ft_face.numGlyphs()) |j| {
+        for (0..faceNumGlyphs(f.ft_face)) |j| {
             try f.ft_face.loadGlyph(@intCast(j), .{ .render = true, .color = f.ft_face.hasColor() });
-            const ft_glyph = f.ft_face.glyph();
+            const ft_glyph = f.ft_face.handle.*.glyph;
 
             const position = packing.positions[i];
             const packing_x: usize = @intCast(position[0]);
             const packing_y: usize = @intCast(position[1]);
-            const ft_bitmap = ft_glyph.bitmap();
+            const ft_bitmap = ft_glyph.*.bitmap;
 
-            const h = ft_bitmap.rows();
-            const w = ft_bitmap.width();
+            const h: usize = @intCast(ft_bitmap.rows);
+            const w: usize = @intCast(ft_bitmap.width);
 
-            switch (ft_bitmap.pixelMode()) {
-                .gray => {
+            switch (ft_bitmap.pixel_mode) {
+                ft.c.FT_PIXEL_MODE_GRAY => {
                     for (0..h) |y| {
                         for (0..w) |x| {
-                            const buffer = ft_bitmap.buffer() orelse continue; // Why is it crashing if I take this out of the loop?
+                            const buffer = if (ft_bitmap.buffer != null) ft_bitmap.buffer else continue;
                             const src = y * w + x;
                             const dst = ((packing_y + y + MARGIN_PX) * packing.size + packing_x + x + MARGIN_PX) * 4;
 
@@ -342,10 +344,10 @@ fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, b
                         }
                     }
                 },
-                .bgra => {
+                ft.c.FT_PIXEL_MODE_BGRA => {
                     for (0..h) |y| {
                         for (0..w) |x| {
-                            const buffer = ft_bitmap.buffer() orelse continue;
+                            const buffer = if (ft_bitmap.buffer != null) ft_bitmap.buffer else continue;
                             const src = (y * w + x) * 4;
                             const dst = ((packing_y + y + MARGIN_PX) * packing.size + packing_x + x + MARGIN_PX) * 4;
 
@@ -364,9 +366,9 @@ fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, b
                 .y = packing.positions[i][1],
                 .width = sizes[i][0],
                 .height = sizes[i][1],
-                .bearing_x = ft_glyph.bitmapLeft() - MARGIN_PX,
-                .bearing_y = ft_glyph.bitmapTop() - MARGIN_PX,
-                .pixel_mode = ft_bitmap.pixelMode(),
+                .bearing_x = ft_glyph.*.bitmap_left - MARGIN_PX,
+                .bearing_y = ft_glyph.*.bitmap_top - MARGIN_PX,
+                .pixel_mode = ft_bitmap.pixel_mode,
             });
 
             i += 1;
@@ -377,9 +379,17 @@ fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, b
     return .{ .size = packing.size, .bitmap = bitmap };
 }
 
+fn faceNumGlyphs(face: ft.Face) usize {
+    return @intCast(face.handle.*.num_glyphs);
+}
+
+fn faceFamilyName(face: ft.Face) []const u8 {
+    return if (face.handle.*.family_name != null) std.mem.span(face.handle.*.family_name) else "Unknown";
+}
+
 /// Split the input string into list of ranges with the same script.
 fn getRanges(allocator: Allocator, value: []const u8) ![]Range {
-    var ranges = std.ArrayList(Range).init(allocator);
+    var ranges = std.ArrayList(Range).empty;
     var utf8 = try std.unicode.Utf8View.init(value);
     var iterator = utf8.iterator();
 
@@ -395,7 +405,7 @@ fn getRanges(allocator: Allocator, value: []const u8) ![]Range {
             if (range.script == script) {
                 range.end = byte_index + slice.len - 1;
             } else {
-                try ranges.append(range.*);
+                try ranges.append(allocator, range.*);
                 current_range = Range{
                     .script = script,
                     .start = byte_index,
@@ -414,18 +424,18 @@ fn getRanges(allocator: Allocator, value: []const u8) ![]Range {
     // std.debug.print("\n", .{});
 
     if (current_range) |range| {
-        try ranges.append(range);
+        try ranges.append(allocator, range);
     }
 
-    return ranges.toOwnedSlice();
+    return ranges.toOwnedSlice(allocator);
 }
 
 /// Segment text into words using ICU4X. Returns a slice of indices where words start or end.
 pub fn segment(allocator: Allocator, value: []const u8) ![]u32 {
     _ = value; // autofix
 
-    var segments = std.ArrayList(u32).init(allocator);
-    return segments.toOwnedSlice();
+    var segments = std.ArrayList(u32).empty;
+    return segments.toOwnedSlice(allocator);
 }
 
 /// Wrapper for calling stb_rect_pack.

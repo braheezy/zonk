@@ -143,7 +143,7 @@ pub fn run(
         if (!config.uncapped_fps) {
             const frame_time = timer.read();
             if (frame_time < frame_ns) {
-                std.time.sleep(frame_ns - frame_time);
+                std.Thread.sleep(frame_ns - frame_time);
             }
         }
     }

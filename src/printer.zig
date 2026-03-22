@@ -329,7 +329,7 @@ pub const Printer = struct {
     }
 
     pub fn deinit(self: *Printer) void {
-        self.commands.deinit();
+        self.commands.deinit(self.allocator);
         self.gctx.releaseResource(self.bind_group);
         self.gctx.releaseResource(self.pipeline);
         self.gctx.releaseResource(self.depth_texture);

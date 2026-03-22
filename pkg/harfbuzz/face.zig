@@ -1,6 +1,5 @@
 const std = @import("std");
 const c = @import("c.zig").c;
-const freetype = @import("freetype");
 
 /// A font face is an object that represents a single face from within a font family.
 ///
@@ -14,9 +13,5 @@ pub const Face = struct {
     /// count reaches zero, the face is destroyed, freeing all memory.
     pub fn destroy(self: *Face) void {
         c.hb_face_destroy(self.handle);
-    }
-
-    pub fn fromFreetypeFace(face: freetype.Face) Face {
-        return .{ .handle = c.hb_ft_face_create_referenced(@ptrCast(face.handle)).? };
     }
 };

@@ -4,10 +4,13 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "png",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+        .linkage = .static,
     });
     lib.linkLibC();
     if (target.result.os.tag == .linux) {
@@ -15,7 +18,7 @@ pub fn build(b: *std.Build) !void {
     }
     if (target.result.os.tag.isDarwin()) {
         const apple_sdk = @import("apple_sdk");
-        try apple_sdk.addPaths(b, lib.root_module);
+        try apple_sdk.addPaths(b, lib);
     }
 
     // For dynamic linking, we prefer dynamic linking and to search by
@@ -43,9 +46,9 @@ pub fn build(b: *std.Build) !void {
     }
 
     if (b.lazyDependency("libpng", .{})) |upstream| {
-        var flags = std.ArrayList([]const u8).init(b.allocator);
-        defer flags.deinit();
-        try flags.appendSlice(&.{
+        var flags: std.ArrayList([]const u8) = .empty;
+        defer flags.deinit(b.allocator);
+        try flags.appendSlice(b.allocator, &.{
             "-DPNG_ARM_NEON_OPT=0",
             "-DPNG_POWERPC_VSX_OPT=0",
             "-DPNG_INTEL_SSE_OPT=0",

@@ -158,7 +158,7 @@ pub fn loadShaderModule(al: std.mem.Allocator, path: []const u8, device: zgpu.wg
         al,
         1024 * 16,
         null,
-        @alignOf(u8),
+        std.mem.Alignment.of(u8),
         0,
     );
     defer al.free(contents);

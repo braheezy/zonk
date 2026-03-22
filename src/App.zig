@@ -48,12 +48,18 @@ pub fn init(allocator: std.mem.Allocator, window_config: GameConfig, screen_conf
     // Create window with window_config dimensions
     zglfw.windowHint(.client_api, .no_api);
     zglfw.windowHint(.resizable, false);
-    const title_sentinel = std.fmt.allocPrintZ(allocator, "{s}", .{window_config.title}) catch unreachable;
+    const title_sentinel = try std.fmt.allocPrintSentinel(
+        allocator,
+        "{s}",
+        .{window_config.title},
+        0,
+    );
     defer allocator.free(title_sentinel);
     const window = try zglfw.createWindow(
         @intCast(window_config.width),
         @intCast(window_config.height),
         title_sentinel,
+        null,
         null,
     );
     std.debug.print("App.init - window created\n", .{});
@@ -90,7 +96,7 @@ pub fn init(allocator: std.mem.Allocator, window_config: GameConfig, screen_conf
             .limits = .{
                 .max_vertex_attributes = 3,
                 .max_vertex_buffers = 1,
-                .max_buffer_size = 100000 * @sizeOf(Graphics.Vertex2D),
+                .max_buffer_size = @max(4 * 1024 * 1024, 100000 * @sizeOf(Graphics.Vertex2D)),
                 .max_vertex_buffer_array_stride = @sizeOf(Graphics.Vertex2D),
                 .max_bind_groups = 1,
                 .max_uniform_buffers_per_shader_stage = 1,
@@ -131,7 +137,7 @@ fn createCallbacks(self: *App) void {
     zglfw.setWindowUserPointer(self.window, @ptrCast(self));
 
     _ = zglfw.setKeyCallback(self.window, struct {
-        fn cb(window: *zglfw.Window, key: zglfw.Key, scancode: i32, action: zglfw.Action, mods: zglfw.Mods) callconv(.C) void {
+        fn cb(window: *zglfw.Window, key: zglfw.Key, scancode: i32, action: zglfw.Action, mods: zglfw.Mods) callconv(.c) void {
             _ = scancode;
             _ = mods;
             const app = window.getUserPointer(App) orelse unreachable;

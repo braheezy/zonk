@@ -166,7 +166,7 @@ pub fn init(
     defer screen_shader_module.release();
 
     const color_targets = [_]zgpu.wgpu.ColorTargetState{.{
-        .format = .bgra8_unorm,
+        .format = zgpu.GraphicsContext.swapchain_format,
         .blend = &zgpu.wgpu.BlendState{
             .color = .{
                 .src_factor = .src_alpha,
@@ -385,7 +385,7 @@ fn drawScreen(self: *Graphics, view: zgpu.wgpu.TextureView, encoder: zgpu.wgpu.C
 
 pub fn render(self: *Graphics) !void {
     // Get the current texture view from the swapchain
-    const view = self.gfx.swapchain.getCurrentTextureView();
+    const view = self.gfx.getCurrentTextureView();
     defer view.release();
 
     // Create command encoder
@@ -454,7 +454,7 @@ pub fn drawRect(self: *Graphics, x: f32, y: f32, width: f32, height: f32, opts: 
     // self.gfx.queue.writeBuffer(self.index_buffer, 0, u16, &indices);
 
     // Get current texture view
-    const view = self.gfx.swapchain.getCurrentTextureView();
+    const view = self.gfx.getCurrentTextureView();
     defer view.release();
 
     // Create command encoder

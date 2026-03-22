@@ -12,27 +12,28 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "macos",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+        .linkage = .static,
     });
 
-    var flags = std.ArrayList([]const u8).init(b.allocator);
-    defer flags.deinit();
     lib.addCSourceFile(.{
-        .file = b.path("os/zig_log.c"),
-        .flags = flags.items,
+        .file = b.path("os/zig_macos.c"),
+        .flags = &.{"-std=c99"},
     });
     lib.addCSourceFile(.{
         .file = b.path("text/ext.c"),
-        .flags = flags.items,
     });
     lib.linkFramework("CoreFoundation");
     lib.linkFramework("CoreGraphics");
     lib.linkFramework("CoreText");
     lib.linkFramework("CoreVideo");
     lib.linkFramework("QuartzCore");
+    lib.linkFramework("IOSurface");
     if (target.result.os.tag == .macos) {
         lib.linkFramework("Carbon");
         module.linkFramework("Carbon", .{});
@@ -44,21 +45,23 @@ pub fn build(b: *std.Build) !void {
         module.linkFramework("CoreText", .{});
         module.linkFramework("CoreVideo", .{});
         module.linkFramework("QuartzCore", .{});
+        module.linkFramework("IOSurface", .{});
 
-        try apple_sdk.addPaths(b, lib.root_module);
-        try apple_sdk.addPaths(b, module);
+        try apple_sdk.addPaths(b, lib);
     }
     b.installArtifact(lib);
 
     {
         const test_exe = b.addTest(.{
             .name = "test",
-            .root_source_file = b.path("main.zig"),
-            .target = target,
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
         });
         if (target.result.os.tag.isDarwin()) {
-            try apple_sdk.addPaths(b, test_exe.root_module);
+            try apple_sdk.addPaths(b, test_exe);
         }
         test_exe.linkLibrary(lib);
 

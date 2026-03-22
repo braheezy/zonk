@@ -23,9 +23,11 @@ pub fn build(b: *std.Build) !void {
     if (target.query.isNative()) {
         test_exe = b.addTest(.{
             .name = "test",
-            .root_source_file = b.path("main.zig"),
-            .target = target,
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
         });
         const tests_run = b.addRunArtifact(test_exe.?);
         const test_step = b.step("test", "Run tests");
@@ -61,20 +63,23 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
 
     const libpng_enabled = options.libpng_enabled;
 
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "freetype",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+        .linkage = .static,
     });
     lib.linkLibC();
     if (target.result.os.tag.isDarwin()) {
         const apple_sdk = @import("apple_sdk");
-        try apple_sdk.addPaths(b, lib.root_module);
+        try apple_sdk.addPaths(b, lib);
     }
 
-    var flags = std.ArrayList([]const u8).init(b.allocator);
-    defer flags.deinit();
-    try flags.appendSlice(&.{
+    var flags: std.ArrayList([]const u8) = .empty;
+    defer flags.deinit(b.allocator);
+    try flags.appendSlice(b.allocator, &.{
         "-DFT2_BUILD_LIBRARY",
 
         "-DFT_CONFIG_OPTION_SYSTEM_ZLIB=1",
@@ -84,6 +89,10 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
 
         "-fno-sanitize=undefined",
     });
+
+    if (target.result.os.tag == .freebsd or target.result.abi == .musl) {
+        try flags.append(b.allocator, "-fPIC");
+    }
 
     const dynamic_link_opts = options.dynamic_link_opts;
 
@@ -98,7 +107,7 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
     // Libpng
     _ = b.systemIntegrationOption("libpng", .{}); // So it shows up in help
     if (libpng_enabled) {
-        try flags.append("-DFT_CONFIG_OPTION_USE_PNG=1");
+        try flags.append(b.allocator, "-DFT_CONFIG_OPTION_USE_PNG=1");
 
         if (b.systemIntegrationOption("libpng", .{})) {
             lib.linkSystemLibrary2("libpng", dynamic_link_opts);

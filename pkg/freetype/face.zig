@@ -7,11 +7,6 @@ const Tag = @import("tag.zig").Tag;
 const Error = errors.Error;
 const intToError = errors.intToError;
 
-pub const GlyphMetrics = c.FT_Glyph_Metrics;
-pub const Matrix = c.FT_Matrix;
-pub const Vector = c.FT_Vector;
-pub const Color = c.FT_Color;
-
 pub const Face = struct {
     handle: c.FT_Face,
 
@@ -198,27 +193,9 @@ pub const Face = struct {
     ) void {
         c.FT_Set_Transform(
             self.handle,
-            @constCast(@ptrCast(matrix)),
-            @constCast(@ptrCast(delta)),
+            @ptrCast(@constCast(matrix)),
+            @ptrCast(@constCast(delta)),
         );
-    }
-
-    pub fn setPixelSizes(self: Face, pixel_width: u32, pixel_height: u32) Error!void {
-        return intToError(c.FT_Set_Pixel_Sizes(self.handle, pixel_width, pixel_height));
-    }
-
-    pub fn numGlyphs(self: Face) u32 {
-        return @intCast(self.handle.*.num_glyphs);
-    }
-
-    pub fn familyName(self: Face) ?[:0]const u8 {
-        return if (self.handle.*.family_name) |family|
-            std.mem.span(@as([*:0]const u8, @ptrCast(family)))
-        else
-            null;
-    }
-    pub fn glyph(self: Face) GlyphSlot {
-        return .{ .handle = self.handle.*.glyph };
     }
 };
 
@@ -275,9 +252,13 @@ pub const RenderMode = enum(c_uint) {
     sdf = c.FT_RENDER_MODE_SDF,
 };
 
-/// A list of bit field constants for FT_Load_Glyph to indicate what kind of
-/// operations to perform during glyph loading.
-pub const LoadFlags = packed struct {
+/// A collection of flags for FT_Load_Glyph that indicate
+/// what kind of operations to perform during glyph loading.
+///
+/// Some of these flags are not included in the official FreeType
+/// documentation, but are nevertheless present and named in the
+/// header, so the names have been copied from there.
+pub const LoadFlags = packed struct(c_int) {
     no_scale: bool = false,
     no_hinting: bool = false,
     render: bool = false,
@@ -286,314 +267,100 @@ pub const LoadFlags = packed struct {
     force_autohint: bool = false,
     crop_bitmap: bool = false,
     pedantic: bool = false,
-    ignore_global_advance_with: bool = false,
+    advance_only: bool = false,
+    ignore_global_advance_width: bool = false,
     no_recurse: bool = false,
     ignore_transform: bool = false,
     monochrome: bool = false,
     linear_design: bool = false,
+    sbits_only: bool = false,
     no_autohint: bool = false,
-    _padding1: u1 = 0,
-    target_normal: bool = false,
-    target_light: bool = false,
-    target_mono: bool = false,
-    target_lcd: bool = false,
-    target_lcd_v: bool = false,
+    target: Target = .normal,
     color: bool = false,
     compute_metrics: bool = false,
     bitmap_metrics_only: bool = false,
-    _padding2: u1 = 0,
+    svg_only: bool = false,
     no_svg: bool = false,
-    _padding3: u7 = 0,
+    _padding: u7 = 0,
 
-    test {
-        // This must always be an i32 size so we can bitcast directly.
-        const testing = std.testing;
-        try testing.expectEqual(@sizeOf(i32), @sizeOf(LoadFlags));
-    }
+    pub const Target = enum(u4) {
+        normal = 0,
+        light = 1,
+        mono = 2,
+        lcd = 3,
+        lcd_v = 4,
+    };
 
     test "bitcast" {
         const testing = std.testing;
+
         const cval: i32 = c.FT_LOAD_RENDER | c.FT_LOAD_PEDANTIC | c.FT_LOAD_COLOR;
         const flags = @as(LoadFlags, @bitCast(cval));
         try testing.expect(!flags.no_hinting);
         try testing.expect(flags.render);
         try testing.expect(flags.pedantic);
         try testing.expect(flags.color);
+
+        // Verify bit alignment (for bit 9)
+        const cval2: i32 = c.FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH;
+        const flags2 = @as(LoadFlags, @bitCast(cval2));
+        try testing.expect(flags2.ignore_global_advance_width);
+        try testing.expect(!flags2.no_recurse);
+    }
+
+    test "all flags individually" {
+        const testing = std.testing;
+
+        try testing.expectEqual(
+            c.FT_LOAD_DEFAULT,
+            @as(c_int, @bitCast(LoadFlags{})),
+        );
+
+        inline for ([_]struct { c_int, []const u8 }{
+            .{ c.FT_LOAD_NO_SCALE, "no_scale" },
+            .{ c.FT_LOAD_NO_HINTING, "no_hinting" },
+            .{ c.FT_LOAD_RENDER, "render" },
+            .{ c.FT_LOAD_NO_BITMAP, "no_bitmap" },
+            .{ c.FT_LOAD_VERTICAL_LAYOUT, "vertical_layout" },
+            .{ c.FT_LOAD_FORCE_AUTOHINT, "force_autohint" },
+            .{ c.FT_LOAD_CROP_BITMAP, "crop_bitmap" },
+            .{ c.FT_LOAD_PEDANTIC, "pedantic" },
+            .{ c.FT_LOAD_ADVANCE_ONLY, "advance_only" },
+            .{ c.FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH, "ignore_global_advance_width" },
+            .{ c.FT_LOAD_NO_RECURSE, "no_recurse" },
+            .{ c.FT_LOAD_IGNORE_TRANSFORM, "ignore_transform" },
+            .{ c.FT_LOAD_MONOCHROME, "monochrome" },
+            .{ c.FT_LOAD_LINEAR_DESIGN, "linear_design" },
+            .{ c.FT_LOAD_SBITS_ONLY, "sbits_only" },
+            .{ c.FT_LOAD_NO_AUTOHINT, "no_autohint" },
+            .{ c.FT_LOAD_COLOR, "color" },
+            .{ c.FT_LOAD_COMPUTE_METRICS, "compute_metrics" },
+            .{ c.FT_LOAD_BITMAP_METRICS_ONLY, "bitmap_metrics_only" },
+            .{ c.FT_LOAD_SVG_ONLY, "svg_only" },
+            .{ c.FT_LOAD_NO_SVG, "no_svg" },
+        }) |pair| {
+            var flags: LoadFlags = .{};
+            @field(flags, pair[1]) = true;
+            try testing.expectEqual(pair[0], @as(c_int, @bitCast(flags)));
+        }
+    }
+
+    test "all load targets" {
+        const testing = std.testing;
+
+        inline for ([_]struct { c_int, Target }{
+            .{ c.FT_LOAD_TARGET_NORMAL, .normal },
+            .{ c.FT_LOAD_TARGET_LIGHT, .light },
+            .{ c.FT_LOAD_TARGET_MONO, .mono },
+            .{ c.FT_LOAD_TARGET_LCD, .lcd },
+            .{ c.FT_LOAD_TARGET_LCD_V, .lcd_v },
+        }) |pair| {
+            const flags: LoadFlags = .{ .target = pair[1] };
+            try testing.expectEqual(pair[0], @as(c_int, @bitCast(flags)));
+        }
     }
 };
 
-pub const GlyphSlot = struct {
-    pub const SubGlyphInfo = struct {
-        index: i32,
-        flags: c_uint,
-        arg1: i32,
-        arg2: i32,
-        transform: Matrix,
-    };
-
-    handle: c.FT_GlyphSlot,
-
-    pub fn library(self: GlyphSlot) Library {
-        return .{ .handle = self.handle.*.library };
-    }
-
-    pub fn face(self: GlyphSlot) Face {
-        return .{ .handle = self.handle.*.face };
-    }
-
-    pub fn next(self: GlyphSlot) GlyphSlot {
-        return .{ .handle = self.handle.*.next };
-    }
-
-    pub fn glyphIndex(self: GlyphSlot) u32 {
-        return self.handle.*.glyph_index;
-    }
-
-    pub fn metrics(self: GlyphSlot) GlyphMetrics {
-        return self.handle.*.metrics;
-    }
-
-    pub fn linearHoriAdvance(self: GlyphSlot) i32 {
-        return @intCast(self.handle.*.linearHoriAdvance);
-    }
-
-    pub fn linearVertAdvance(self: GlyphSlot) i32 {
-        return @intCast(self.handle.*.linearVertAdvance);
-    }
-
-    pub fn advance(self: GlyphSlot) Vector {
-        return self.handle.*.advance;
-    }
-
-    pub fn format(self: GlyphSlot) GlyphFormat {
-        return @enumFromInt(self.handle.*.format);
-    }
-
-    pub fn ownBitmap(self: GlyphSlot) Error!void {
-        try intToError(c.FT_GlyphSlot_Own_Bitmap(self.handle));
-    }
-
-    pub fn bitmap(self: GlyphSlot) Bitmap {
-        return .{ .handle = self.handle.*.bitmap };
-    }
-
-    pub fn bitmapLeft(self: GlyphSlot) i32 {
-        return self.handle.*.bitmap_left;
-    }
-
-    pub fn bitmapTop(self: GlyphSlot) i32 {
-        return self.handle.*.bitmap_top;
-    }
-
-    // pub fn outline(self: GlyphSlot) ?Outline {
-    //     return if (self.format() == .outline) .{ .handle = &self.handle.*.outline } else null;
-    // }
-
-    pub fn lsbDelta(self: GlyphSlot) i32 {
-        return @intCast(self.handle.*.lsb_delta);
-    }
-
-    pub fn rsbDelta(self: GlyphSlot) i32 {
-        return @intCast(self.handle.*.rsb_delta);
-    }
-
-    pub fn render(self: GlyphSlot, render_mode: RenderMode) Error!void {
-        return intToError(c.FT_Render_Glyph(self.handle, @intFromEnum(render_mode)));
-    }
-
-    pub fn adjustWeight(self: GlyphSlot, x_delta: i32, y_delta: i32) void {
-        return c.FT_GlyphSlot_AdjustWeight(self.handle, x_delta, y_delta);
-    }
-
-    pub fn slant(self: GlyphSlot, x_slant: i32, y_slant: i32) void {
-        return c.FT_GlyphSlot_Slant(self.handle, x_slant, y_slant);
-    }
-
-    pub fn getSubGlyphInfo(self: GlyphSlot, sub_index: u32) Error!SubGlyphInfo {
-        var info: SubGlyphInfo = undefined;
-        try intToError(c.FT_Get_SubGlyph_Info(self.handle, sub_index, &info.index, &info.flags, &info.arg1, &info.arg2, &info.transform));
-        return info;
-    }
-
-    pub fn getGlyph(self: GlyphSlot) Error!Glyph {
-        var res: c.FT_Glyph = undefined;
-        try intToError(c.FT_Get_Glyph(self.handle, &res));
-        return Glyph{ .handle = res };
-    }
-};
-pub const Glyph = struct {
-    handle: c.FT_Glyph,
-
-    pub fn deinit(self: Glyph) void {
-        c.FT_Done_Glyph(self.handle);
-    }
-
-    pub fn newGlyph(library: Library, glyph_format: GlyphFormat) Glyph {
-        var g: c.FT_Glyph = undefined;
-        return .{
-            .handle = c.FT_New_Glyph(library.handle, @intFromEnum(glyph_format), &g),
-        };
-    }
-
-    pub fn copy(self: Glyph) Error!Glyph {
-        var g: c.FT_Glyph = undefined;
-        try intToError(c.FT_Glyph_Copy(self.handle, &g));
-        return Glyph{ .handle = g };
-    }
-
-    // pub fn transform(self: Glyph, matrix: ?Matrix, delta: ?Vector) Error!void {
-    //     try intToError(c.FT_Glyph_Transform(self.handle, if (matrix) |m| &m else null, if (delta) |d| &d else null));
-    // }
-
-    // pub fn getCBox(self: Glyph, bbox_mode: BBoxMode) BBox {
-    //     var b: BBox = undefined;
-    //     c.FT_Glyph_Get_CBox(self.handle, @intFromEnum(bbox_mode), &b);
-    //     return b;
-    // }
-
-    pub fn toBitmapGlyph(self: *Glyph, render_mode: RenderMode, origin: ?c.FT_Vector) Error!BitmapGlyph {
-        try intToError(c.FT_Glyph_To_Bitmap(&self.handle, @intFromEnum(render_mode), if (origin) |o| &o else null, 1));
-        return BitmapGlyph{ .handle = @ptrCast(self.handle) };
-    }
-
-    pub fn copyBitmapGlyph(self: *Glyph, render_mode: RenderMode, origin: ?c.FT_Vector) Error!BitmapGlyph {
-        try intToError(c.FT_Glyph_To_Bitmap(&self.handle, @intFromEnum(render_mode), if (origin) |o| &o else null, 0));
-        return BitmapGlyph{ .handle = @ptrCast(self.handle) };
-    }
-
-    // pub fn castBitmapGlyph(self: Glyph) Error!BitmapGlyph {
-    //     return BitmapGlyph{ .handle = @ptrCast(self.handle) };
-    // }
-
-    // pub fn castOutlineGlyph(self: Glyph) Error!OutlineGlyph {
-    //     return OutlineGlyph{ .handle = @ptrCast(self.handle) };
-    // }
-
-    // pub fn castSvgGlyph(self: Glyph) Error!SvgGlyph {
-    //     return SvgGlyph{ .handle = @ptrCast(self.handle) };
-    // }
-
-    // pub fn stroke(self: *Glyph, stroker: Stroker) Error!void {
-    //     try intToError(c.FT_Glyph_Stroke(&self.handle, stroker.handle, 0));
-    // }
-
-    // pub fn strokeBorder(self: *Glyph, stroker: Stroker, inside: bool) Error!void {
-    //     try intToError(c.FT_Glyph_StrokeBorder(&self.handle, stroker.handle, if (inside) 1 else 0, 0));
-    // }
-
-    pub fn format(self: Glyph) GlyphFormat {
-        return @enumFromInt(self.handle.*.format);
-    }
-
-    pub fn advanceX(self: Glyph) isize {
-        return self.handle.*.advance.x;
-    }
-
-    pub fn advanceY(self: Glyph) isize {
-        return self.handle.*.advance.y;
-    }
-};
-
-pub const GlyphFormat = enum(u32) {
-    none = c.FT_GLYPH_FORMAT_NONE,
-    composite = c.FT_GLYPH_FORMAT_COMPOSITE,
-    bitmap = c.FT_GLYPH_FORMAT_BITMAP,
-    outline = c.FT_GLYPH_FORMAT_OUTLINE,
-    plotter = c.FT_GLYPH_FORMAT_PLOTTER,
-    svg = c.FT_GLYPH_FORMAT_SVG,
-};
-
-pub const Bitmap = struct {
-    handle: c.FT_Bitmap,
-
-    pub fn init() Bitmap {
-        var b: c.FT_Bitmap = undefined;
-        c.FT_Bitmap_Init(&b);
-        return .{ .handle = b };
-    }
-
-    pub fn deinit(self: *Bitmap, lib: Library) void {
-        _ = c.FT_Bitmap_Done(lib.handle, &self.handle);
-    }
-
-    pub fn copy(self: Bitmap, lib: Library) Error!Bitmap {
-        var b: c.FT_Bitmap = undefined;
-        try intToError(c.FT_Bitmap_Copy(lib.handle, &self.handle, &b));
-        return Bitmap{ .handle = b };
-    }
-
-    pub fn embolden(self: *Bitmap, lib: Library, x_strength: i32, y_strength: i32) Error!void {
-        try intToError(c.FT_Bitmap_Embolden(lib.handle, &self.handle, x_strength, y_strength));
-    }
-
-    pub fn convert(self: Bitmap, lib: Library, alignment: u29) Error!Bitmap {
-        var b: c.FT_Bitmap = undefined;
-        try intToError(c.FT_Bitmap_Convert(lib.handle, &self.handle, &b, alignment));
-        return Bitmap{ .handle = b };
-    }
-
-    pub fn blend(self: *Bitmap, lib: Library, source_offset: c.FT_Vector, target_offset: *Vector, color: Color) Error!void {
-        var b: c.FT_Bitmap = undefined;
-        c.FT_Bitmap_Init(&b);
-        try intToError(c.FT_Bitmap_Blend(lib.handle, &self.handle, source_offset, &b, target_offset, color));
-    }
-
-    pub fn width(self: Bitmap) u32 {
-        return self.handle.width;
-    }
-
-    pub fn pitch(self: Bitmap) i32 {
-        return self.handle.pitch;
-    }
-
-    pub fn rows(self: Bitmap) u32 {
-        return self.handle.rows;
-    }
-
-    pub fn pixelMode(self: Bitmap) PixelMode {
-        return @enumFromInt(self.handle.pixel_mode);
-    }
-
-    pub fn buffer(self: Bitmap) ?[]const u8 {
-        const buffer_size = @abs(self.pitch()) * self.rows();
-        return if (self.handle.buffer == null)
-            // freetype returns a null pointer for zero-length allocations
-            // https://github.com/hexops-graveyard/freetype/blob/bbd80a52b7b749140ec87d24b6c767c5063be356/freetype/src/base/ftutil.c#L135
-            null
-        else
-            self.handle.buffer[0..buffer_size];
-    }
-};
-pub const BitmapGlyph = struct {
-    handle: c.FT_BitmapGlyph,
-
-    pub fn deinit(self: BitmapGlyph) void {
-        c.FT_Done_Glyph(@ptrCast(self.handle));
-    }
-
-    pub fn left(self: BitmapGlyph) i32 {
-        return self.handle.*.left;
-    }
-
-    pub fn top(self: BitmapGlyph) i32 {
-        return self.handle.*.top;
-    }
-
-    pub fn bitmap(self: BitmapGlyph) Bitmap {
-        return .{ .handle = self.handle.*.bitmap };
-    }
-};
-
-pub const PixelMode = enum(u3) {
-    none = c.FT_PIXEL_MODE_NONE,
-    mono = c.FT_PIXEL_MODE_MONO,
-    gray = c.FT_PIXEL_MODE_GRAY,
-    gray2 = c.FT_PIXEL_MODE_GRAY2,
-    gray4 = c.FT_PIXEL_MODE_GRAY4,
-    lcd = c.FT_PIXEL_MODE_LCD,
-    lcd_v = c.FT_PIXEL_MODE_LCD_V,
-    bgra = c.FT_PIXEL_MODE_BGRA,
-};
 test "loading memory font" {
     const testing = std.testing;
     const font_data = @import("test.zig").font_regular;

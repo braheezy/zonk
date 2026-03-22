@@ -5,69 +5,47 @@
 
     .fingerprint = 0x4753ed006f2ca216,
 
-    .minimum_zig_version = "0.14.0",
+    .minimum_zig_version = "0.15.2",
 
     .dependencies = .{
         // To handle windowing and input
         .zglfw = .{
-            .url = "git+https://github.com/zig-gamedev/zglfw#30b29eee8047852708e79aadf0425494e6d7c5b5",
-            .hash = "zglfw-0.10.0-dev-zgVDNG2cIQAiAC_gLYmbML-NQklPW5B_AELV_fAQc2Jg",
+            .url = "git+https://github.com/zig-gamedev/zglfw#0dd29d8073487c9fe1e45e6b729b3aac271d5a71",
+            .hash = "zglfw-0.10.0-dev-zgVDNIG4IQBWN_sfMD-xfC9bJS2hbBN2W7jNlDLovcdC",
         },
         // Main WebGPU library
         .zgpu = .{
-            .url = "git+https://github.com/zig-gamedev/zgpu#3ae4a71af16df3a7dfa95023bba1a1e6a0bfb80d",
-            .hash = "zgpu-0.12.0-dev-nqFT5BCgCADqzg95ZvomJREp6oIl3NTubfyiUNHc18Pr",
+            .path = "zgpu",
+            // .url = "git+https://github.com/braheezy/zgpu#aa8111282ec81b9ac9cc501f9d1210f0dcfbab51",
+            // .hash = "zgpu-0.14.0-nqFT5GsZFQAM_eIOImIge0tm4AIaR0np3KHp5FNZBumU",
         },
         // Math library
         .zmath = .{
-            .url = "git+https://github.com/zig-gamedev/zmath#ccf7297ef6c01e21b2d51ad81b5b6ce929e86a00",
-            .hash = "zmath-0.11.0-dev-wjwivZY1AwDO7yxNmZ5HWoU03f9mFBet8LN9-oYc3i29",
+            .url = "git+https://github.com/zig-gamedev/zmath#3a5955b2b72cd081563fbb084eff05bffd1e3fbb",
+            .hash = "zmath-0.11.0-dev-wjwivdMsAwD-xaLj76YHUq3t9JDH-X16xuMTmnDzqbu2",
         },
         // OBJ loader
         .obj = .{
-            .url = "git+https://github.com/chip2n/zig-obj#4ad4f6463b553395a1cd5388846d8623f350bf8b",
-            .hash = "obj-3.0.0-v8OfipDLAAAfZnwVIVO_8cb6ZWpkxWK6-HTkkF-k6WuO",
-        },
-        // imgui wrapper
-        .zgui = .{
-            .url = "git+https://github.com/zig-gamedev/zgui#2f1d380d4368cd6920737450b336ed5a828acbba",
-            .hash = "zgui-0.6.0-dev--L6sZGCbaADGizfy2-omhUzjs_7s3yFi7UYHLuHf_Dib",
+            .url = "git+https://github.com/chip2n/zig-obj#47410383c81d24454e370ffadc0980af7abea522",
+            .hash = "obj-3.0.2-v8OfitvLAADxUf6oMHCiWxjJILklY-IMKXlwX-Pv8rKu",
         },
         // image decoder
         .zpix = .{
+            .path = "zpix",
             // .url = "git+https://github.com/braheezy/zpix#80dc79feede7023d36a142df8f20992e32dde5f6",
             // .hash = "zpix-0.2.0-Og3bwGoiCgCEJ5CX8AzpQWZooSJx6VcyOkxao0INNvT_",
-            .path = "zpix",
         },
+        // From ghostty
         .harfbuzz = .{ .path = "pkg/harfbuzz" },
         .freetype = .{ .path = "pkg/freetype" },
         .macos = .{ .path = "pkg/macos" },
-        .zoto = .{ .path = "lib/zoto" },
-        // Pre-compiled WebGPU libraries for different platforms
-        .dawn_x86_64_windows_gnu = .{
-            .url = "https://github.com/michal-z/webgpu_dawn-x86_64-windows-gnu/archive/d3a68014e6b6b53fd330a0ccba99e4dcfffddae5.tar.gz",
-            .hash = "1220f9448cde02ef3cd51bde2e0850d4489daa0541571d748154e89c6eb46c76a267",
-            .lazy = true,
+        .zoto = .{
+            .url = "git+https://github.com/braheezy/zoto#58aa6443c072a92318e4b04eeee053eebe761f74",
+            .hash = "zoto-0.1.0-Eh0DjNOsAQCcXq1r9R4XeM1RKUzUocgmQxLn3F359rCG",
         },
-        .dawn_x86_64_linux_gnu = .{
-            .url = "https://github.com/michal-z/webgpu_dawn-x86_64-linux-gnu/archive/7d70db023bf254546024629cbec5ee6113e12a42.tar.gz",
-            .hash = "12204a3519efd49ea2d7cf63b544492a3a771d37eda320f86380813376801e4cfa73",
-            .lazy = true,
-        },
-        .dawn_aarch64_linux_gnu = .{
-            .url = "https://github.com/michal-z/webgpu_dawn-aarch64-linux-gnu/archive/c1f55e740a62f6942ff046e709ecd509a005dbeb.tar.gz",
-            .hash = "12205cd13f6849f94ef7688ee88c6b74c7918a5dfb514f8a403fcc2929a0aa342627",
-            .lazy = true,
-        },
-        .dawn_aarch64_macos = .{
-            .url = "https://github.com/michal-z/webgpu_dawn-aarch64-macos/archive/d2360cdfff0cf4a780cb77aa47c57aca03cc6dfe.tar.gz",
-            .hash = "N-V-__8AALVIRAIf5nfpx8-4mEo2RGsynVryPQPcHk95qFM5",
-            .lazy = true,
-        },
-        .dawn_x86_64_macos = .{
-            .url = "https://github.com/michal-z/webgpu_dawn-x86_64-macos/archive/901716b10b31ce3e0d3fe479326b41e91d59c661.tar.gz",
-            .hash = "1220b1f02f2f7edd98a078c64e3100907d90311d94880a3cc5927e1ac009d002667a",
-            .lazy = true,
+        .zigaudio = .{
+            .url = "git+https://github.com/braheezy/zigaudio#0c074dce91ae0e5c7017e55b1a62f832444d5388",
+            .hash = "zigaudio-0.1.0-hDNruLLfHgB4QjIyJGzRqL2KLg23tI8WRwix_K1k8fwD",
         },
     },
 

@@ -66,7 +66,7 @@ pub const DisplayLink = opaque {
                     flagsIn: c.CVOptionFlags,
                     flagsOut: *c.CVOptionFlags,
                     inner_userinfo: ?*anyopaque,
-                ) callconv(.C) c.CVReturn {
+                ) callconv(.c) c.CVReturn {
                     _ = inNow;
                     _ = inOutputTime;
                     _ = flagsIn;
@@ -74,7 +74,7 @@ pub const DisplayLink = opaque {
 
                     callbackFn(
                         displayLink,
-                        @alignCast(@ptrCast(inner_userinfo)),
+                        @ptrCast(@alignCast(inner_userinfo)),
                     );
                     return c.kCVReturnSuccess;
                 }

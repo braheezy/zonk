@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
     zonk_mod.addImport("zglfw", zglfw.module("root"));
 
     // zgpu
-    const zgpu = b.dependency("zgpu", .{});
+    const zgpu = b.dependency("zgpu", .{ .webgpu_backend = .wgpu });
     zonk_mod.addImport("zgpu", zgpu.module("root"));
 
     // zmath
@@ -65,10 +65,8 @@ pub fn build(b: *std.Build) void {
 
     if (target.result.os.tag != .emscripten) {
         zonk_mod.linkLibrary(zglfw.artifact("glfw"));
-        zonk_mod.linkLibrary(zgpu.artifact("zdawn"));
+        // zonk_mod.linkLibrary(zgpu.artifact("zdawn"));
     }
-
-    addLibraryPathsTo(b, zonk_mod);
 
     const zoto_dep = b.dependency("zoto", .{});
     const zoto_mod = zoto_dep.module("zoto");
@@ -78,43 +76,9 @@ pub fn build(b: *std.Build) void {
 
     // buildPong(b, target, optimize, zonk_mod, zpix);
     buildAnimation(b, target, optimize, zonk_mod, zpix);
-    buildSine(b, target, optimize, zoto_mod);
-    buildQoaplay(b, target, optimize, zoto_mod);
-    buildBlur(b, target, optimize, zonk_mod);
-}
-
-fn addLibraryPathsTo(b: *std.Build, module: *std.Build.Module) void {
-    const target = module.resolved_target.?.result;
-    switch (target.os.tag) {
-        .windows => {
-            if (b.lazyDependency("dawn_x86_64_windows_gnu", .{})) |dawn_prebuilt| {
-                module.addLibraryPath(dawn_prebuilt.path(""));
-            }
-        },
-        .linux => {
-            if (target.cpu.arch.isX86()) {
-                if (b.lazyDependency("dawn_x86_64_linux_gnu", .{})) |dawn_prebuilt| {
-                    module.addLibraryPath(dawn_prebuilt.path(""));
-                }
-            } else if (target.cpu.arch.isAARCH64()) {
-                if (b.lazyDependency("dawn_aarch64_linux_gnu", .{})) |dawn_prebuilt| {
-                    module.addLibraryPath(dawn_prebuilt.path(""));
-                }
-            }
-        },
-        .macos => {
-            if (target.cpu.arch.isX86()) {
-                if (b.lazyDependency("dawn_x86_64_macos", .{})) |dawn_prebuilt| {
-                    module.addLibraryPath(dawn_prebuilt.path(""));
-                }
-            } else if (target.cpu.arch.isAARCH64()) {
-                if (b.lazyDependency("dawn_aarch64_macos", .{})) |dawn_prebuilt| {
-                    module.addLibraryPath(dawn_prebuilt.path(""));
-                }
-            }
-        },
-        else => {},
-    }
+    // buildSine(b, target, optimize, zoto_mod);
+    // buildQoaplay(b, target, optimize, zoto_mod);
+    // buildBlur(b, target, optimize, zonk_mod);
 }
 
 fn buildPong(
@@ -142,7 +106,6 @@ fn buildPong(
     const run_pong_step = b.step("pong", "Run the pong example");
     run_pong_step.dependOn(&run_pong.step);
 
-    @import("zgpu").addLibraryPathsTo(pong_exe);
     pong_mod.addImport("zonk", zonk_mod);
     pong_mod.addImport("image", image_mod);
     pong_mod.addImport("color", color_mod);
@@ -170,7 +133,6 @@ fn buildAnimation(
         .root_module = animation_mod,
         .name = "animation",
     });
-    @import("zgpu").addLibraryPathsTo(animation_exe);
     b.installArtifact(animation_exe);
     const run_animation = b.addRunArtifact(animation_exe);
     const run_animation_step = b.step("animation", "Run the animation example");
