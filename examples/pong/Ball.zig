@@ -1,10 +1,10 @@
 const std = @import("std");
 const zonk = @import("zonk");
+const Image = zonk.Image;
 const image = @import("zpix").image;
 const color = @import("color");
 const Rectangle = image.Rectangle;
 const Drawer = image.Drawer;
-const RGBAImage = image.RGBAImage;
 const Paddle = @import("Paddle.zig");
 
 const Ball = @This();
@@ -137,10 +137,10 @@ pub fn update(self: *Ball, left_paddle: *const Paddle, right_paddle: *const Padd
     }
 }
 
-pub fn draw(self: *Ball, screen: *RGBAImage) void {
+pub fn draw(self: *Ball, screen: *Image) void {
     if (!self.is_visible) return;
 
-    const bounds = screen.bounds();
+    const bounds = screen.rgba_image.bounds();
     const screen_width = @as(u32, @intCast(bounds.dX()));
     const screen_height = @as(u32, @intCast(bounds.dY()));
 
@@ -174,7 +174,7 @@ pub fn draw(self: *Ball, screen: *RGBAImage) void {
     };
 
     // Draw the ball as a white filled rectangle (for now, can be changed to circle later)
-    var d = Drawer.init(screen);
+    var d = Drawer.init(&screen.rgba_image);
     const white = color.Color{ .rgba = .{ .r = 255, .g = 255, .b = 255, .a = 255 } };
     d.fillRect(ball_rect, white);
 }

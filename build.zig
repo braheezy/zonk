@@ -70,14 +70,16 @@ pub fn build(b: *std.Build) void {
 
     const zoto_dep = b.dependency("zoto", .{});
     const zoto_mod = zoto_dep.module("zoto");
+    const zigaudio_dep = b.dependency("zigaudio", .{});
+    const zigaudio_mod = zigaudio_dep.module("zigaudio");
 
     const macos_dep = b.dependency("macos", .{});
     zoto_mod.linkLibrary(macos_dep.artifact("macos"));
 
-    // buildPong(b, target, optimize, zonk_mod, zpix);
+    buildPong(b, target, optimize, zonk_mod, zpix);
     buildAnimation(b, target, optimize, zonk_mod, zpix);
-    // buildSine(b, target, optimize, zoto_mod);
-    // buildQoaplay(b, target, optimize, zoto_mod);
+    buildSine(b, target, optimize, zoto_mod);
+    buildQoaplay(b, target, optimize, zoto_mod, zigaudio_mod);
     // buildBlur(b, target, optimize, zonk_mod);
 }
 
@@ -145,17 +147,11 @@ fn buildSine(
     optimize: std.builtin.OptimizeMode,
     zoto_mod: *std.Build.Module,
 ) void {
-    const qoa_mod = b.createModule(.{
-        .root_source_file = b.path("lib/qoa/qoa.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
     const sine_mod = b.createModule(.{
         .root_source_file = b.path("examples/sine/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    sine_mod.addImport("qoa", qoa_mod);
     const sine_exe = b.addExecutable(.{
         .root_module = sine_mod,
         .name = "sine",
@@ -174,19 +170,15 @@ fn buildQoaplay(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     zoto_mod: *std.Build.Module,
+    zigaudio_mod: *std.Build.Module,
 ) void {
-    const qoa_mod = b.createModule(.{
-        .root_source_file = b.path("lib/qoa/qoa.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
     const qoaplay_mod = b.createModule(.{
         .root_source_file = b.path("examples/qoaplay/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    qoaplay_mod.addImport("qoa", qoa_mod);
     qoaplay_mod.addImport("zoto", zoto_mod);
+    qoaplay_mod.addImport("zigaudio", zigaudio_mod);
     const qoaplay_exe = b.addExecutable(.{
         .root_module = qoaplay_mod,
         .name = "qoaplay",

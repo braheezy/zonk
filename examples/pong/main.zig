@@ -1,6 +1,5 @@
 const std = @import("std");
 const zonk = @import("zonk");
-const image = @import("image");
 const PongGame = @import("PongGame.zig");
 
 pub fn main() !void {
@@ -19,7 +18,7 @@ pub fn main() !void {
         .width = 800,
         .height = 600,
         .vsync = true,
-        .enable_text_rendering = true,
+        .enable_text_rendering = false,
     };
 
     // Configure and run game

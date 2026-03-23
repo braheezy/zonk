@@ -1,15 +1,12 @@
 const zonk = @import("zonk");
 const std = @import("std");
 const image = @import("image");
+const Image = zonk.Image;
 const Paddle = @import("Paddle.zig");
 const Ball = @import("Ball.zig");
 const color = @import("color");
 const Rectangle = image.Rectangle;
 const Drawer = image.Drawer;
-
-const yellow = [4]f32{ 1.0, 1.0, 0.0, 1.0 };
-const white = [4]f32{ 1.0, 1.0, 1.0, 1.0 };
-const padding_top = 100;
 
 pub const PongGame = @This();
 
@@ -107,9 +104,9 @@ pub fn reset(self: *PongGame) !void {
     self.score_right = 0;
 }
 
-fn drawDottedLine(self: *PongGame, screen: *image.RGBAImage) void {
+fn drawDottedLine(self: *PongGame, screen: *Image) void {
     _ = self;
-    const bounds = screen.bounds();
+    const bounds = screen.rgba_image.bounds();
     const width = bounds.dX();
     const height = bounds.dY();
 
@@ -117,7 +114,7 @@ fn drawDottedLine(self: *PongGame, screen: *image.RGBAImage) void {
     const dot_height = 10;
     const gap_height = 10;
 
-    var d = Drawer.init(screen);
+    var d = Drawer.init(&screen.rgba_image);
     const white_color = color.Color{ .rgba = .{ .r = 255, .g = 255, .b = 255, .a = 255 } };
 
     var y: usize = 0;
@@ -138,9 +135,9 @@ fn drawDottedLine(self: *PongGame, screen: *image.RGBAImage) void {
     }
 }
 
-pub fn draw(self: *PongGame, screen: *image.RGBAImage) void {
+pub fn draw(self: *PongGame, screen: *Image) void {
     // Clear screen to black
-    screen.clear(.{ .rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 } });
+    screen.fill(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
 
     // Draw dotted line down the middle
     self.drawDottedLine(screen);
@@ -149,19 +146,13 @@ pub fn draw(self: *PongGame, screen: *image.RGBAImage) void {
     self.left_paddle.draw(screen);
     self.right_paddle.draw(screen);
     self.ball.draw(screen);
-
-    const center_x: f32 = @floatFromInt(self.window_width / 2);
-    zonk.print("{d}", .{self.score_left}, center_x - 100, padding_top, white) catch unreachable;
-    zonk.print("{d}", .{self.score_right}, center_x + 100, padding_top, white) catch unreachable;
-
-    // Draw FPS counter at bottom left corner with absolute coordinates
-    zonk.print("fps: {d:02}", .{zonk.getFPS()}, 50, @floatFromInt(self.window_height - 50), yellow) catch unreachable;
 }
 
-pub fn layout(self: *PongGame, width: usize, height: usize) void {
+pub fn layout(self: *PongGame, width: usize, height: usize) zonk.Game.LayoutDim {
     self.window_width = width;
     self.window_height = height;
     self.left_paddle.layout(width, height);
     self.right_paddle.layout(width, height);
     self.ball.layout(width, height);
+    return .{ .width = width, .height = height };
 }

@@ -169,7 +169,7 @@ pub const Printer = struct {
     }
 
     pub fn text(self: *Printer, value: []const u8, x: f32, y: f32, color: [4]f32) !void {
-        try self.commands.append(.{
+        try self.commands.append(self.allocator, .{
             .position = .{ x, y },
             .text = try self.allocator.dupe(u8, value),
             .color = color,

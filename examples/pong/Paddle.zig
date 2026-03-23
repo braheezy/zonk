@@ -1,10 +1,10 @@
 const std = @import("std");
 const zonk = @import("zonk");
+const Image = zonk.Image;
 const image = @import("zpix").image;
 const color = @import("color");
 const Rectangle = image.Rectangle;
 const Drawer = image.Drawer;
-const RGBAImage = image.RGBAImage;
 const zglfw = zonk.zglfw;
 const Ball = @import("Ball.zig");
 
@@ -106,8 +106,8 @@ pub fn update(self: *Paddle, ball: *const Ball) void {
     }
 }
 
-pub fn draw(self: *Paddle, screen: *RGBAImage) void {
-    const bounds = screen.bounds();
+pub fn draw(self: *Paddle, screen: *Image) void {
+    const bounds = screen.rgba_image.bounds();
     const screen_width = @as(u32, @intCast(bounds.dX()));
     const screen_height = @as(u32, @intCast(bounds.dY()));
 
@@ -124,7 +124,7 @@ pub fn draw(self: *Paddle, screen: *RGBAImage) void {
     };
 
     // Create a drawer and draw the paddle as a white rectangle
-    var d = Drawer.init(screen);
+    var d = Drawer.init(&screen.rgba_image);
     const white = color.Color{ .rgba = .{ .r = 255, .g = 255, .b = 255, .a = 255 } };
     d.fillRect(paddle_rect, white);
 }
