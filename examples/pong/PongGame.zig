@@ -1,16 +1,17 @@
 const zonk = @import("zonk");
 const std = @import("std");
-const image = @import("image");
+const image = zonk.image;
 const Image = zonk.Image;
 const Paddle = @import("Paddle.zig");
 const Ball = @import("Ball.zig");
-const color = @import("color");
+const color = zonk.color;
 const Rectangle = image.Rectangle;
 const Drawer = image.Drawer;
 
 pub const PongGame = @This();
 
 allocator: std.mem.Allocator,
+io: std.Io,
 left_paddle: *Paddle,
 right_paddle: *Paddle,
 ball: *Ball,
@@ -20,7 +21,7 @@ score_right: u32 = 0,
 window_width: usize = 0,
 window_height: usize = 0,
 
-pub fn init(allocator: std.mem.Allocator) !*PongGame {
+pub fn init(allocator: std.mem.Allocator, io: std.Io) !*PongGame {
     const game = try allocator.create(PongGame);
 
     // Create paddles with initial positions
@@ -37,10 +38,11 @@ pub fn init(allocator: std.mem.Allocator) !*PongGame {
     });
 
     // Create ball with default configuration (starts in center)
-    const ball = try Ball.create(allocator, .{});
+    const ball = try Ball.create(allocator, io, .{});
 
     game.* = .{
         .allocator = allocator,
+        .io = io,
         .left_paddle = left_paddle,
         .right_paddle = right_paddle,
         .ball = ball,

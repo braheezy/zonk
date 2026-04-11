@@ -1,17 +1,20 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const zonk = @import("zonk");
 const PongGame = @import("PongGame.zig");
 
 pub fn main() !void {
     // Memory allocation setup
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer if (gpa.deinit() == .leak) {
-        std.process.exit(1);
-    };
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer assert(debug_allocator.deinit() == .ok);
+    const gpa = debug_allocator.allocator();
+
+    var threaded: std.Io.Threaded = .init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
 
     // Create game instance
-    var game = try PongGame.init(allocator);
+    var game = try PongGame.init(gpa, io);
     defer game.deinit();
     const config = zonk.GameConfig{
         .title = "Pong",
@@ -25,7 +28,8 @@ pub fn main() !void {
     try zonk.run(
         PongGame,
         game,
-        allocator,
+        gpa,
+        io,
         config,
     );
 }

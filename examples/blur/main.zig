@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const builtin = @import("builtin");
 const zonk = @import("zonk");
 
@@ -32,24 +33,14 @@ const BlurGame = struct {
     }
 };
 
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
 pub fn main() !void {
-    // Memory allocation setup
-    const allocator, const is_debug = gpa: {
-        if (builtin.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
-        break :gpa switch (builtin.mode) {
-            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
-            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
-        };
-    };
-    defer {
-        if (is_debug) {
-            if (debug_allocator.deinit() == .leak) {
-                std.process.exit(1);
-            }
-        }
-    }
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer assert(debug_allocator.deinit() == .ok);
+    const gpa = debug_allocator.allocator();
+
+    var threaded: std.Io.Threaded = .init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
 
     const config = zonk.GameConfig{
         .title = "Blur Example",
@@ -58,7 +49,7 @@ pub fn main() !void {
     };
 
     var game = BlurGame{};
-    test_image = try zonk.Image.fromFile(allocator, "examples/blur/image.png");
+    test_image = try zonk.Image.fromFile(gpa, io, "examples/blur/image.png");
 
     // Debug: Print image dimensions
     const bounds = test_image.rgba_image.bounds();
@@ -67,5 +58,5 @@ pub fn main() !void {
 
     defer test_image.deinit(); // Clean up the image
 
-    try zonk.run(BlurGame, &game, allocator, config);
+    try zonk.run(BlurGame, &game, gpa, io, config);
 }

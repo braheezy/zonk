@@ -41,11 +41,11 @@ pub const GlyphInfo = struct {
     pixel_mode: u8,
 };
 
-var last_step: i128 = 0;
-fn logTime(message: []const u8) void {
-    const now = std.time.nanoTimestamp();
-    std.debug.print("{s} took {d}ms\n", .{ message, @divTrunc(now - last_step, 1_000_000) });
-    last_step = now;
+var last_step: i96 = 0;
+fn logTime(message: []const u8, io: std.Io) void {
+    const now = std.Io.Clock.real.now(io);
+    std.debug.print("{s} took {d}ms\n", .{ message, @divTrunc(now.nanoseconds - last_step, 1_000_000) });
+    last_step = now.nanoseconds;
 }
 
 const GlyphMap = std.AutoHashMap(u32, GlyphInfo);
@@ -79,6 +79,7 @@ const emoji = @embedFile("./assets/NotoColorEmoji-COLRv1.ttf");
 /// Font encapsulates FreeType and HarfBuzz logic for shaping text. Generates font atlas texture in the `init()` method.
 pub const Library = struct {
     allocator: Allocator,
+    io: std.Io,
     gctx: *zgpu.GraphicsContext,
     ft_lib: ft.Library,
     fonts: []Font,
@@ -86,7 +87,7 @@ pub const Library = struct {
     atlas_size: u32 = 0,
     dpr: u32,
 
-    pub fn init(allocator: Allocator, gctx: *zgpu.GraphicsContext, dpr: u32) !Library {
+    pub fn init(allocator: Allocator, io: std.Io, gctx: *zgpu.GraphicsContext, dpr: u32) !Library {
         var ft_lib = try ft.Library.init();
         const v = ft_lib.version();
         std.debug.print("FreeType version: {d}.{d}.{d}\n", .{ v.major, v.minor, v.patch });
@@ -101,6 +102,7 @@ pub const Library = struct {
 
         return Library{
             .allocator = allocator,
+            .io = io,
             .gctx = gctx,
             .ft_lib = ft_lib,
             .fonts = fonts,
@@ -124,7 +126,7 @@ pub const Library = struct {
 
     /// Generate the font atlas after all fonts have been added.
     pub fn finalizeAtlas(self: *Library) !void {
-        const font_atlas = try generateFontAtlas(self.allocator, self.fonts);
+        const font_atlas = try generateFontAtlas(self.allocator, self.io, self.fonts);
         defer self.allocator.free(font_atlas.bitmap);
 
         const atlas_texture = self.gctx.createTexture(.{
@@ -145,7 +147,7 @@ pub const Library = struct {
             font_atlas.bitmap,
         );
 
-        logTime("Uploading texture to GPU");
+        logTime("Uploading texture to GPU", self.io);
         self.atlas_texture = atlas_texture;
         self.atlas_size = font_atlas.size;
     }
@@ -253,8 +255,8 @@ fn scriptToDirection(script: hb.Script) hb.Direction {
 }
 
 /// Generate font atlas texture from the input fonts.
-fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, bitmap: []u8 } {
-    logTime("Before init");
+fn generateFontAtlas(allocator: Allocator, io: std.Io, fonts: []Font) !struct { size: u32, bitmap: []u8 } {
+    logTime("Before init", io);
     var all_characters_len: u64 = 0;
     for (fonts) |f| {
         const count = faceNumGlyphs(f.ft_face);
@@ -293,7 +295,7 @@ fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, b
             i += 1;
         }
     }
-    logTime("Gathering sizes");
+    logTime("Gathering sizes", io);
 
     // This is purely for debugging.
     var total_area: i32 = 0;
@@ -309,7 +311,7 @@ fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, b
     };
     defer allocator.free(packing.positions);
 
-    logTime("Packing atlas");
+    logTime("Packing atlas", io);
 
     const bitmap = try allocator.alloc(u8, @intCast(packing.size * packing.size * 4));
     @memset(bitmap, 0); // Clear the bitmap.
@@ -374,7 +376,7 @@ fn generateFontAtlas(allocator: Allocator, fonts: []Font) !struct { size: u32, b
             i += 1;
         }
     }
-    logTime("Copying bitmaps");
+    logTime("Copying bitmaps", io);
 
     return .{ .size = packing.size, .bitmap = bitmap };
 }

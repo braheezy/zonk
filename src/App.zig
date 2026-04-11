@@ -28,9 +28,11 @@ pub const App = @This();
 
 // Core engine state
 allocator: std.mem.Allocator,
+io: std.Io,
 window: *zglfw.Window,
 graphics: *Graphics,
 input: InputState,
+pending_scroll_delta: [2]f32,
 
 // Game state
 delta_time: f32,
@@ -41,7 +43,7 @@ game: ?Game = null,
 width: u32,
 height: u32,
 
-pub fn init(allocator: std.mem.Allocator, window_config: GameConfig, screen_config: GameConfig) !*App {
+pub fn init(allocator: std.mem.Allocator, io: std.Io, window_config: GameConfig, screen_config: GameConfig) !*App {
     std.debug.print("App.init - initializing GLFW\n", .{});
     try zglfw.init();
 
@@ -68,9 +70,11 @@ pub fn init(allocator: std.mem.Allocator, window_config: GameConfig, screen_conf
     const app = try allocator.create(App);
     app.* = .{
         .allocator = allocator,
+        .io = io,
         .window = window,
         .graphics = undefined,
         .input = try InputState.init(allocator),
+        .pending_scroll_delta = .{ 0.0, 0.0 },
         .delta_time = 0,
         .total_time = 0,
         .width = window_config.width,
@@ -109,6 +113,7 @@ pub fn init(allocator: std.mem.Allocator, window_config: GameConfig, screen_conf
     app.graphics = try Graphics.init(
         gfx,
         allocator,
+        io,
         screen_config.width,
         screen_config.height,
     );
@@ -129,7 +134,7 @@ pub fn enableTextRendering(self: *App) !void {
     std.debug.assert(content_scale_xy[0] == content_scale_xy[1]); // Require square pixels.
     const dpr: u32 = @intFromFloat(@round(content_scale_xy[0])); // Round to full pixels.
 
-    try self.graphics.enableTextRendering(dpr);
+    try self.graphics.enableTextRendering(self.io, dpr);
 }
 
 fn createCallbacks(self: *App) void {
@@ -142,6 +147,14 @@ fn createCallbacks(self: *App) void {
             _ = mods;
             const app = window.getUserPointer(App) orelse unreachable;
             app.input.setKeyState(key, action != .release);
+        }
+    }.cb);
+
+    _ = zglfw.setScrollCallback(self.window, struct {
+        fn cb(window: *zglfw.Window, x_offset: f64, y_offset: f64) callconv(.c) void {
+            const app = window.getUserPointer(App) orelse unreachable;
+            app.pending_scroll_delta[0] += @as(f32, @floatCast(x_offset));
+            app.pending_scroll_delta[1] += @as(f32, @floatCast(y_offset));
         }
     }.cb);
 
@@ -195,4 +208,10 @@ pub fn deinit(self: *App) void {
 pub fn isRunning(self: *App) bool {
     return !self.window.shouldClose() and
         self.window.getKey(.escape) != .press;
+}
+
+pub fn consumeScrollDelta(self: *App) [2]f32 {
+    const delta = self.pending_scroll_delta;
+    self.pending_scroll_delta = .{ 0.0, 0.0 };
+    return delta;
 }

@@ -1,33 +1,25 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const builtin = @import("builtin");
 const zigaudio = @import("zigaudio");
 const zoto = @import("zoto");
-
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 fn calcSongLength(frame_count: usize, sample_rate: u32) i128 {
     return @as(i128, @intCast((@as(u128, frame_count) * std.time.ns_per_s) / sample_rate));
 }
 
 pub fn main() !void {
-    const allocator, const is_debug = gpa: {
-        if (builtin.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
-        break :gpa switch (builtin.mode) {
-            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
-            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
-        };
-    };
-    defer {
-        if (is_debug) {
-            if (debug_allocator.deinit() == .leak) {
-                std.process.exit(1);
-            }
-        }
-    }
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer assert(debug_allocator.deinit() == .ok);
+    const gpa = debug_allocator.allocator();
+
+    var threaded: std.Io.Threaded = .init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
 
     const data = @embedFile("island_zone.qoa");
-    const decoder = try zigaudio.fromMemory(allocator, data);
-    defer decoder.deinit(allocator);
+    const decoder = try zigaudio.fromMemory(gpa, data);
+    defer decoder.deinit(gpa);
 
     std.debug.print("sample_count: {d}\n", .{decoder.info.total_frames});
     std.debug.print("channels: {d}\n", .{decoder.info.channels});
@@ -39,9 +31,9 @@ pub fn main() !void {
         .format = .float32_le,
     };
 
-    const context = try zoto.newContext(allocator, options);
+    const context = try zoto.newContext(gpa, options);
     defer {
-        std.Thread.sleep(std.time.ns_per_ms * 100);
+        std.Io.sleep(io, .fromNanoseconds(std.time.ns_per_ms * 100), .awake) catch {};
         context.deinit();
     }
 
@@ -55,19 +47,19 @@ pub fn main() !void {
     try player.play();
 
     while (!player.isPlaying()) {
-        std.Thread.sleep(std.time.ns_per_ms * 10);
+        std.Io.sleep(io, .fromNanoseconds(std.time.ns_per_ms * 10), .awake) catch {};
     }
 
-    const start_time = std.time.nanoTimestamp();
+    const start_time = std.Io.Timestamp.now(io, .awake).toNanoseconds();
     const max_wait_time = calcSongLength(decoder.info.total_frames, decoder.info.sample_rate);
 
     while (player.isPlaying()) {
-        const elapsed = std.time.nanoTimestamp() - start_time;
+        const elapsed = std.Io.Timestamp.now(io, .awake).toNanoseconds() - start_time;
         if (elapsed >= max_wait_time) {
             std.debug.print("Timeout reached, stopping playback\n", .{});
             break;
         }
-        std.Thread.sleep(std.time.ns_per_ms * 50);
+        std.Io.sleep(io, .fromNanoseconds(std.time.ns_per_ms * 50), .awake) catch {};
     }
 
     std.debug.print("QOA playback completed\n", .{});

@@ -5,17 +5,18 @@
 
     .fingerprint = 0x4753ed006f2ca216,
 
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0-dev.3028+a85495ca2",
 
     .dependencies = .{
         // To handle windowing and input
         .zglfw = .{
-            .url = "git+https://github.com/zig-gamedev/zglfw#0dd29d8073487c9fe1e45e6b729b3aac271d5a71",
-            .hash = "zglfw-0.10.0-dev-zgVDNIG4IQBWN_sfMD-xfC9bJS2hbBN2W7jNlDLovcdC",
+            .path = "../zglfw",
+            // .url = "git+https://github.com/zig-gamedev/zglfw#0dd29d8073487c9fe1e45e6b729b3aac271d5a71",
+            // .hash = "zglfw-0.10.0-dev-zgVDNIG4IQBWN_sfMD-xfC9bJS2hbBN2W7jNlDLovcdC",
         },
         // Main WebGPU library
         .zgpu = .{
-            .path = "zgpu",
+            .path = "../zgpu",
             // .url = "git+https://github.com/braheezy/zgpu#aa8111282ec81b9ac9cc501f9d1210f0dcfbab51",
             // .hash = "zgpu-0.14.0-nqFT5GsZFQAM_eIOImIge0tm4AIaR0np3KHp5FNZBumU",
         },
@@ -30,22 +31,25 @@
             .hash = "obj-3.0.2-v8OfitvLAADxUf6oMHCiWxjJILklY-IMKXlwX-Pv8rKu",
         },
         // image decoder
-        .zpix = .{
-            .path = "zpix",
-            // .url = "git+https://github.com/braheezy/zpix#80dc79feede7023d36a142df8f20992e32dde5f6",
-            // .hash = "zpix-0.2.0-Og3bwGoiCgCEJ5CX8AzpQWZooSJx6VcyOkxao0INNvT_",
+        .zigimg = .{
+            .path = "../zigimg",
         },
         // From ghostty
         .harfbuzz = .{ .path = "pkg/harfbuzz" },
         .freetype = .{ .path = "pkg/freetype" },
         .macos = .{ .path = "pkg/macos" },
         .zoto = .{
-            .url = "git+https://github.com/braheezy/zoto#58aa6443c072a92318e4b04eeee053eebe761f74",
-            .hash = "zoto-0.1.0-Eh0DjNOsAQCcXq1r9R4XeM1RKUzUocgmQxLn3F359rCG",
+            .path = "../zoto",
+            // .url = "git+https://github.com/braheezy/zoto#58aa6443c072a92318e4b04eeee053eebe761f74",
+            // .hash = "zoto-0.1.0-Eh0DjNOsAQCcXq1r9R4XeM1RKUzUocgmQxLn3F359rCG",
         },
         .zigaudio = .{
-            .url = "git+https://github.com/braheezy/zigaudio#0c074dce91ae0e5c7017e55b1a62f832444d5388",
-            .hash = "zigaudio-0.1.0-hDNruLLfHgB4QjIyJGzRqL2KLg23tI8WRwix_K1k8fwD",
+            .path = "../zigaudio",
+            // .url = "git+https://github.com/braheezy/zigaudio#0c074dce91ae0e5c7017e55b1a62f832444d5388",
+            // .hash = "zigaudio-0.1.0-hDNruLLfHgB4QjIyJGzRqL2KLg23tI8WRwix_K1k8fwD",
+        },
+        .zstroke = .{
+            .path = "../zstroke",
         },
     },
 

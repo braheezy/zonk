@@ -1,7 +1,6 @@
 const std = @import("std");
-const RGBAImage = @import("image").RGBAImage;
 const Game = @This();
-const Image = @import("Image.zig").Image;
+const Image = @import("Image.zig");
 
 vtable: *const VTable,
 instance: *anyopaque,

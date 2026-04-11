@@ -1,11 +1,10 @@
 const std = @import("std");
 const zgpu = @import("zgpu");
 const obj = @import("obj");
-const jpeg = @import("jpeg");
-const png = @import("png");
 const zmath = @import("zmath");
-const img_module = @import("image");
-const Image = @import("Image.zig").Image;
+const zigimg = @import("zigimg");
+const image_mod = @import("ImagePrimitives.zig");
+const Image = @import("Image.zig");
 
 const ResourceManager = @This();
 
@@ -148,22 +147,21 @@ pub fn loadGeometryFromObj(
     return vertex_data;
 }
 
-pub fn loadShaderModule(al: std.mem.Allocator, path: []const u8, device: zgpu.wgpu.Device) !zgpu.wgpu.ShaderModule {
+pub fn loadShaderModule(io: std.Io, path: []const u8, device: zgpu.wgpu.Device) !zgpu.wgpu.ShaderModule {
     // open file
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
 
     // read file
-    const contents = try file.readToEndAllocOptions(
-        al,
-        1024 * 16,
-        null,
-        std.mem.Alignment.of(u8),
+    var buf: [1024 * 16:0]u8 = undefined;
+    const read_length = try file.readPositionalAll(
+        io,
+        &buf,
         0,
     );
-    defer al.free(contents);
+    buf[read_length] = 0;
 
-    return zgpu.createWgslShaderModule(device, contents, null);
+    return zgpu.createWgslShaderModule(device, buf[0..read_length :0].ptr, null);
 }
 
 pub fn loadTexture(
@@ -172,19 +170,15 @@ pub fn loadTexture(
     path: []const u8,
     texture_view: *?zgpu.TextureViewHandle,
 ) !zgpu.TextureHandle {
-    const ext = std.fs.path.extension(path);
-    const image =
-        if (std.mem.eql(u8, ext, ".jpg") or std.mem.eql(u8, ext, ".jpeg"))
-            try jpeg.load(allocator, path)
-        else
-            try png.load(allocator, path);
-    defer image.free(allocator);
+    var read_buffer: [8 * 1024]u8 = undefined;
+    var decoded = try zigimg.Image.fromFilePath(allocator, path, &read_buffer);
+    defer decoded.deinit(allocator);
 
-    const bounds = image.bounds();
+    const bounds = decodedToRect(decoded);
     const width: u32 = @intCast(bounds.dX());
     const height: u32 = @intCast(bounds.dY());
 
-    const texture_pixels = try image.rgbaPixels(allocator);
+    const texture_pixels = try imageToRGBABytes(allocator, &decoded);
     defer allocator.free(texture_pixels);
 
     const mip_level_count = bitWidth(@max(width, height));
@@ -463,15 +457,12 @@ pub fn computeTbnWithNormal(corners: [3]VertexAttr, expected_normal: [3]f32) zma
 /// Load an image from a file and return it as a Zonk Image
 pub fn loadImage(
     allocator: std.mem.Allocator,
+    io: std.Io,
     path: []const u8,
 ) !*Image {
-    // Use the same loading pattern as loadTexture
-    const ext = std.fs.path.extension(path);
-    var loaded_image = if (std.mem.eql(u8, ext, ".jpg") or std.mem.eql(u8, ext, ".jpeg"))
-        try jpeg.load(allocator, path)
-    else
-        try png.load(allocator, path);
-    defer loaded_image.free(allocator);
+    var read_buffer: [8 * 1024]u8 = undefined;
+    var loaded_image = try zigimg.Image.fromFilePath(allocator, io, path, &read_buffer);
+    defer loaded_image.deinit(allocator);
 
     // Convert to RGBA format regardless of source format
     const rgba_image = try imageToRGBA(allocator, &loaded_image);
@@ -486,26 +477,31 @@ pub fn loadImage(
 }
 
 /// Convert any image format to RGBA
-fn imageToRGBA(allocator: std.mem.Allocator, img: *img_module.Image) !img_module.RGBAImage {
-    // Always use the slow method to ensure we own our own copy of the pixels
-    return imageToRGBASlow(allocator, img);
+fn imageToRGBA(allocator: std.mem.Allocator, img: *zigimg.Image) !image_mod.RGBAImage {
+    const rgba_image = try image_mod.RGBAImage.init(allocator, decodedToRect(img.*));
+    const pixels = try imageToRGBABytes(allocator, img);
+    defer allocator.free(pixels);
+    @memcpy(rgba_image.pixels, pixels);
+    return rgba_image;
 }
 
-/// Convert any image format to RGBA using slow but universal method
-fn imageToRGBASlow(allocator: std.mem.Allocator, img: *img_module.Image) !img_module.RGBAImage {
-    const size = img.bounds().size();
-    const width = size.x;
-    const height = size.y;
-
-    // Create a new RGBA image
-    var rgba_image = try img_module.RGBAImage.init(allocator, img_module.Rectangle{
+fn decodedToRect(img: zigimg.Image) image_mod.Rectangle {
+    return .{
         .min = .{ .x = 0, .y = 0 },
-        .max = .{ .x = width, .y = height },
-    });
+        .max = .{
+            .x = @intCast(img.width),
+            .y = @intCast(img.height),
+        },
+    };
+}
 
-    const pixels = try img.rgbaPixels(allocator);
-    defer allocator.free(pixels);
-    @memcpy(rgba_image.pixels[0..], pixels[0..]);
+fn imageToRGBABytes(allocator: std.mem.Allocator, img: *zigimg.Image) ![]u8 {
+    if (img.pixelFormat() != .rgba32) {
+        img.convert(allocator, .rgba32) catch |err| switch (err) {
+            error.NoConversionNeeded => {},
+            else => return err,
+        };
+    }
 
-    return rgba_image;
+    return allocator.dupe(u8, img.rawBytes());
 }

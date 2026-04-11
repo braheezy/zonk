@@ -66,7 +66,7 @@ const YourGame = struct {
 pub fn main() !void {
     var game = YourGame{};
 
-    try zonk.run(
+try zonk.run(
         YourGame,
         &game,
         std.heap.page_allocator,
@@ -78,9 +78,13 @@ pub fn main() !void {
             .uncapped_fps = false,
             .enable_text_rendering = true,
         },
-    );
+);
 }
 ```
+
+### Low-Level GPU Apps
+
+For demos that need custom `zgpu` pipelines instead of drawing into Zonk's software `Image`, use `zonk.runApp`. The runtime still owns the window, input state, scroll accumulation, timing, and graphics context, while your app receives `*zonk.App` in `initApp`, `update`, `draw`, and `deinitApp`.
 
 ### Rendering
 
@@ -126,6 +130,8 @@ The Pong example in `examples/pong` demonstrates core Zonk concepts including:
 - Rendering and text display
 
 Run it with `zig build pong`.
+
+The `stroke` example in `examples/stroke` shows this lower-level path by reusing `zstroke` for stroke generation and letting Zonk manage the app/runtime shell.
 
 ## Attribution
 

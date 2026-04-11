@@ -1,16 +1,45 @@
 const std = @import("std");
 pub const zglfw = @import("zglfw");
 
-const image = @import("image");
+const zigimg = @import("zigimg");
+pub const image = @import("ImagePrimitives.zig");
 pub const Game = @import("Game.zig");
 pub const InputState = @import("input_state.zig");
-pub const Image = @import("Image.zig").Image;
-pub const color = @import("color");
-
-const App = @import("App.zig");
+pub const Image = @import("Image.zig");
+pub const color = @import("color.zig");
+pub const App = @import("App.zig").App;
 
 pub var input_state: *InputState = undefined;
 pub var app: *App = undefined;
+
+const FrameTimer = struct {
+    io: std.Io,
+    frame_start: std.Io.Clock.Timestamp,
+    last_tick: std.Io.Clock.Timestamp,
+
+    fn init(io: std.Io) FrameTimer {
+        const now = std.Io.Clock.Timestamp.now(io, .awake);
+        return .{
+            .io = io,
+            .frame_start = now,
+            .last_tick = now,
+        };
+    }
+
+    fn lap(self: *FrameTimer) u64 {
+        const now = std.Io.Clock.Timestamp.now(self.io, .awake);
+        const elapsed = self.last_tick.durationTo(now);
+        self.last_tick = now;
+        self.frame_start = now;
+        return @intCast(elapsed.raw.nanoseconds);
+    }
+
+    fn read(self: *const FrameTimer) u64 {
+        const now = std.Io.Clock.Timestamp.now(self.io, .awake);
+        const elapsed = self.frame_start.durationTo(now);
+        return @intCast(elapsed.raw.nanoseconds);
+    }
+};
 
 // FPS tracking
 var frame_times: [120]f32 = undefined;
@@ -43,6 +72,7 @@ pub fn run(
     comptime T: type,
     instance: *T,
     allocator: std.mem.Allocator,
+    io: std.Io,
     config: GameConfig,
 ) !void {
     // Initialize the game to get layout dimensions first
@@ -59,7 +89,7 @@ pub fn run(
         .enable_text_rendering = config.enable_text_rendering,
     };
 
-    app = try App.init(allocator, config, screen_config);
+    app = try App.init(allocator, io, config, screen_config);
     defer app.deinit();
 
     app.game = Game.init(T, instance);
@@ -67,7 +97,7 @@ pub fn run(
 
     const fps = 60;
     const frame_ns = std.time.ns_per_s / fps;
-    var timer = try std.time.Timer.start();
+    var timer = FrameTimer.init(io);
     var acc: u64 = 0;
 
     // Reset FPS tracking
@@ -143,8 +173,48 @@ pub fn run(
         if (!config.uncapped_fps) {
             const frame_time = timer.read();
             if (frame_time < frame_ns) {
-                std.Thread.sleep(frame_ns - frame_time);
+                try std.Io.Clock.Duration.sleep(.{
+                    .clock = .awake,
+                    .raw = .{ .nanoseconds = @intCast(frame_ns - frame_time) },
+                }, io);
             }
+        }
+    }
+}
+
+pub fn runApp(
+    comptime T: type,
+    instance: *T,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    config: GameConfig,
+) !void {
+    app = try App.init(allocator, io, config, config);
+    defer app.deinit();
+
+    input_state = &app.input;
+
+    if (@hasDecl(T, "initApp")) {
+        try instance.initApp(app);
+    }
+    defer if (@hasDecl(T, "deinitApp")) {
+        instance.deinitApp(app);
+    };
+
+    var timer = FrameTimer.init(io);
+
+    while (app.isRunning()) {
+        zglfw.pollEvents();
+        app.input.update();
+        const elapsed = timer.lap();
+        app.delta_time = @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(std.time.ns_per_s));
+        app.total_time += app.delta_time;
+
+        if (@hasDecl(T, "update")) {
+            try instance.update(app);
+        }
+        if (@hasDecl(T, "draw")) {
+            try instance.draw(app);
         }
     }
 }
@@ -160,11 +230,15 @@ pub fn print(comptime fmt: []const u8, args: anytype, x: f32, y: f32, text_color
     }
 }
 
-pub fn newImageFromImage(allocator: std.mem.Allocator, img: *image.Image) !*Image {
-    const size = img.bounds().size();
+pub fn newImageFromImage(allocator: std.mem.Allocator, img: *zigimg.Image) !*Image {
+    const size = .{
+        .x = @as(i32, @intCast(img.width)),
+        .y = @as(i32, @intCast(img.height)),
+    };
     const zonk_image = try Image.init(allocator, size.x, size.y);
 
     const bytes = try imageToBytes(allocator, img);
+    defer allocator.free(bytes);
     const region = image.Rectangle{
         .min = .{ .x = 0, .y = 0 },
         .max = .{ .x = size.x, .y = size.y },
@@ -173,39 +247,13 @@ pub fn newImageFromImage(allocator: std.mem.Allocator, img: *image.Image) !*Imag
     return zonk_image;
 }
 
-fn imageToBytes(allocator: std.mem.Allocator, img: *image.Image) ![]u8 {
-    const size = img.bounds().size();
-    const width = size.x;
-    const height = size.y;
-
-    switch (img.*) {
-        .RGBA => |i| {
-            if (i.pixels.len == width * height * 4) {
-                return i.pixels;
-            } else {
-                return imageToBytesSlow(allocator, img);
-            }
-        },
-        else => {
-            return imageToBytesSlow(allocator, img);
-        },
+fn imageToBytes(allocator: std.mem.Allocator, img: *zigimg.Image) ![]u8 {
+    if (img.pixelFormat() != .rgba32) {
+        img.convert(allocator, .rgba32) catch |err| switch (err) {
+            error.NoConversionNeeded => {},
+            else => return err,
+        };
     }
-}
 
-fn imageToBytesSlow(allocator: std.mem.Allocator, img: *image.Image) ![]u8 {
-    const size = img.bounds().size();
-    const width = size.x;
-    const height = size.y;
-    const pixel_buffer = try allocator.alloc(u8, @as(usize, @intCast(width * height * 4)));
-    const dst_img = &image.RGBAImage{
-        .pixels = pixel_buffer,
-        .stride = width * 4,
-        .rect = .{
-            .min = .{ .x = 0, .y = 0 },
-            .max = .{ .x = width, .y = height },
-        },
-    };
-
-    image.draw(img, dst_img);
-    return pixel_buffer;
+    return allocator.dupe(u8, img.rawBytes());
 }

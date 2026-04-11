@@ -30,6 +30,7 @@ pub fn build(b: *std.Build) !void {
         options.addOption(bool, "coretext", coretext_enabled);
         options.addOption(bool, "freetype", freetype_enabled);
         module.addOptions("build_options", options);
+        addTargetConditionals(module, target.result);
         break :harfbuzz module;
     };
 
@@ -49,14 +50,15 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
         }),
     });
+    addTargetConditionals(test_exe.root_module, target.result);
 
     {
         var it = module.import_table.iterator();
         while (it.next()) |entry| test_exe.root_module.addImport(entry.key_ptr.*, entry.value_ptr.*);
         if (b.systemIntegrationOption("freetype", .{})) {
-            test_exe.linkSystemLibrary2("freetype2", dynamic_link_opts);
+            test_exe.root_module.linkSystemLibrary("freetype2", dynamic_link_opts);
         } else {
-            test_exe.linkLibrary(freetype.artifact("freetype"));
+            test_exe.root_module.linkLibrary(freetype.artifact("freetype"));
         }
         const tests_run = b.addRunArtifact(test_exe);
         const test_step = b.step("test", "Run tests");
@@ -65,7 +67,7 @@ pub fn build(b: *std.Build) !void {
 
     if (b.systemIntegrationOption("harfbuzz", .{})) {
         module.linkSystemLibrary("harfbuzz", dynamic_link_opts);
-        test_exe.linkSystemLibrary2("harfbuzz", dynamic_link_opts);
+        test_exe.root_module.linkSystemLibrary("harfbuzz", dynamic_link_opts);
     } else {
         const lib = try buildLib(b, module, .{
             .target = target,
@@ -77,7 +79,7 @@ pub fn build(b: *std.Build) !void {
             .dynamic_link_opts = dynamic_link_opts,
         });
 
-        test_exe.linkLibrary(lib);
+        test_exe.root_module.linkLibrary(lib);
     }
 }
 
@@ -99,11 +101,12 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
+            .link_libcpp = true,
         }),
         .linkage = .static,
     });
-    lib.linkLibC();
-    lib.linkLibCpp();
+    addTargetConditionals(lib.root_module, target.result);
 
     if (target.result.os.tag.isDarwin()) {
         try apple_sdk.addPaths(b, lib);
@@ -138,10 +141,10 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         });
 
         if (b.systemIntegrationOption("freetype", .{})) {
-            lib.linkSystemLibrary2("freetype2", dynamic_link_opts);
+            lib.root_module.linkSystemLibrary("freetype2", dynamic_link_opts);
             module.linkSystemLibrary("freetype2", dynamic_link_opts);
         } else {
-            lib.linkLibrary(freetype.artifact("freetype"));
+            lib.root_module.linkLibrary(freetype.artifact("freetype"));
 
             if (freetype.builder.lazyDependency(
                 "freetype",
@@ -154,14 +157,14 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
 
     if (coretext_enabled) {
         try flags.appendSlice(b.allocator, &.{"-DHAVE_CORETEXT=1"});
-        lib.linkFramework("CoreText");
+        lib.root_module.linkFramework("CoreText", .{});
         module.linkFramework("CoreText", .{});
     }
 
     if (b.lazyDependency("harfbuzz", .{})) |upstream| {
-        lib.addIncludePath(upstream.path("src"));
+        lib.root_module.addIncludePath(upstream.path("src"));
         module.addIncludePath(upstream.path("src"));
-        lib.addCSourceFile(.{
+        lib.root_module.addCSourceFile(.{
             .file = upstream.path("src/harfbuzz.cc"),
             .flags = flags.items,
         });
@@ -175,4 +178,31 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
     b.installArtifact(lib);
 
     return lib;
+}
+
+fn addTargetConditionals(module: *std.Build.Module, target: std.Target) void {
+    switch (target.cpu.arch) {
+        .aarch64, .aarch64_be => module.addCMacro("TARGET_CPU_ARM64", "1"),
+        .x86_64 => module.addCMacro("TARGET_CPU_X86_64", "1"),
+        .x86 => module.addCMacro("TARGET_CPU_X86", "1"),
+        else => {},
+    }
+
+    switch (target.os.tag) {
+        .macos => {
+            module.addCMacro("TARGET_OS_OSX", "1");
+            module.addCMacro("TARGET_OS_MAC", "1");
+        },
+        .ios => {
+            module.addCMacro("TARGET_OS_IPHONE", "1");
+            module.addCMacro("TARGET_OS_IOS", "1");
+        },
+        .linux, .freebsd, .netbsd, .openbsd, .dragonfly => {
+            module.addCMacro("TARGET_OS_UNIX", "1");
+        },
+        .windows => {
+            module.addCMacro("TARGET_OS_WIN32", "1");
+        },
+        else => {},
+    }
 }

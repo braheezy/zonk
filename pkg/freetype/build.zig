@@ -10,6 +10,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    addTargetConditionals(module, target.result);
 
     // For dynamic linking, we prefer dynamic linking and to search by
     // mode first. Mode first will search all paths for a dynamic library
@@ -29,6 +30,7 @@ pub fn build(b: *std.Build) !void {
                 .optimize = optimize,
             }),
         });
+        addTargetConditionals(test_exe.?.root_module, target.result);
         const tests_run = b.addRunArtifact(test_exe.?);
         const test_step = b.step("test", "Run tests");
         test_step.dependOn(&tests_run.step);
@@ -39,7 +41,7 @@ pub fn build(b: *std.Build) !void {
     if (b.systemIntegrationOption("freetype", .{})) {
         module.linkSystemLibrary("freetype2", dynamic_link_opts);
         if (test_exe) |exe| {
-            exe.linkSystemLibrary2("freetype2", dynamic_link_opts);
+            exe.root_module.linkSystemLibrary("freetype2", dynamic_link_opts);
         }
     } else {
         const lib = try buildLib(b, module, .{
@@ -52,7 +54,7 @@ pub fn build(b: *std.Build) !void {
         });
 
         if (test_exe) |exe| {
-            exe.linkLibrary(lib);
+            exe.root_module.linkLibrary(lib);
         }
     }
 }
@@ -68,10 +70,11 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-    lib.linkLibC();
+    addTargetConditionals(lib.root_module, target.result);
     if (target.result.os.tag.isDarwin()) {
         const apple_sdk = @import("apple_sdk");
         try apple_sdk.addPaths(b, lib);
@@ -83,6 +86,8 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         "-DFT2_BUILD_LIBRARY",
 
         "-DFT_CONFIG_OPTION_SYSTEM_ZLIB=1",
+
+        "-DTARGET_CPU_ARM64=1",
 
         "-DHAVE_UNISTD_H",
         "-DHAVE_FCNTL_H",
@@ -98,10 +103,10 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
 
     // Zlib
     if (b.systemIntegrationOption("zlib", .{})) {
-        lib.linkSystemLibrary2("zlib", dynamic_link_opts);
+        lib.root_module.linkSystemLibrary("zlib", dynamic_link_opts);
     } else {
         const zlib_dep = b.dependency("zlib", .{ .target = target, .optimize = optimize });
-        lib.linkLibrary(zlib_dep.artifact("z"));
+        lib.root_module.linkLibrary(zlib_dep.artifact("z"));
     }
 
     // Libpng
@@ -110,50 +115,50 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         try flags.append(b.allocator, "-DFT_CONFIG_OPTION_USE_PNG=1");
 
         if (b.systemIntegrationOption("libpng", .{})) {
-            lib.linkSystemLibrary2("libpng", dynamic_link_opts);
+            lib.root_module.linkSystemLibrary("libpng", dynamic_link_opts);
         } else {
             const libpng_dep = b.dependency(
                 "libpng",
                 .{ .target = target, .optimize = optimize },
             );
-            lib.linkLibrary(libpng_dep.artifact("png"));
+            lib.root_module.linkLibrary(libpng_dep.artifact("png"));
         }
     }
 
     if (b.lazyDependency("freetype", .{})) |upstream| {
-        lib.addIncludePath(upstream.path("include"));
+        lib.root_module.addIncludePath(upstream.path("include"));
         module.addIncludePath(upstream.path("include"));
-        lib.addCSourceFiles(.{
+        lib.root_module.addCSourceFiles(.{
             .root = upstream.path(""),
             .files = srcs,
             .flags = flags.items,
         });
 
         switch (target.result.os.tag) {
-            .linux => lib.addCSourceFile(.{
+            .linux => lib.root_module.addCSourceFile(.{
                 .file = upstream.path("builds/unix/ftsystem.c"),
                 .flags = flags.items,
             }),
-            .windows => lib.addCSourceFile(.{
+            .windows => lib.root_module.addCSourceFile(.{
                 .file = upstream.path("builds/windows/ftsystem.c"),
                 .flags = flags.items,
             }),
-            else => lib.addCSourceFile(.{
+            else => lib.root_module.addCSourceFile(.{
                 .file = upstream.path("src/base/ftsystem.c"),
                 .flags = flags.items,
             }),
         }
         switch (target.result.os.tag) {
             .windows => {
-                lib.addCSourceFile(.{
+                lib.root_module.addCSourceFile(.{
                     .file = upstream.path("builds/windows/ftdebug.c"),
                     .flags = flags.items,
                 });
-                lib.addWin32ResourceFile(.{
+                lib.root_module.addWin32ResourceFile(.{
                     .file = upstream.path("src/base/ftver.rc"),
                 });
             },
-            else => lib.addCSourceFile(.{
+            else => lib.root_module.addCSourceFile(.{
                 .file = upstream.path("src/base/ftdebug.c"),
                 .flags = flags.items,
             }),
@@ -170,6 +175,33 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
     b.installArtifact(lib);
 
     return lib;
+}
+
+fn addTargetConditionals(module: *std.Build.Module, target: std.Target) void {
+    switch (target.cpu.arch) {
+        .aarch64, .aarch64_be => module.addCMacro("TARGET_CPU_ARM64", "1"),
+        .x86_64 => module.addCMacro("TARGET_CPU_X86_64", "1"),
+        .x86 => module.addCMacro("TARGET_CPU_X86", "1"),
+        else => {},
+    }
+
+    switch (target.os.tag) {
+        .macos => {
+            module.addCMacro("TARGET_OS_OSX", "1");
+            module.addCMacro("TARGET_OS_MAC", "1");
+        },
+        .ios => {
+            module.addCMacro("TARGET_OS_IPHONE", "1");
+            module.addCMacro("TARGET_OS_IOS", "1");
+        },
+        .linux, .freebsd, .netbsd, .openbsd, .dragonfly => {
+            module.addCMacro("TARGET_OS_UNIX", "1");
+        },
+        .windows => {
+            module.addCMacro("TARGET_OS_WIN32", "1");
+        },
+        else => {},
+    }
 }
 
 const srcs: []const []const u8 = &.{

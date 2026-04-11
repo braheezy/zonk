@@ -1,8 +1,8 @@
 const std = @import("std");
 const zonk = @import("zonk");
 const Image = zonk.Image;
-const image = @import("zpix").image;
-const color = @import("color");
+const image = zonk.image;
+const color = zonk.color;
 const Rectangle = image.Rectangle;
 const Drawer = image.Drawer;
 const Paddle = @import("Paddle.zig");
@@ -17,6 +17,7 @@ speed: f32 = 5.0,
 is_visible: bool = true,
 screen_height: f32 = 600.0, // Default screen height, will be updated in layout
 player_scored: ?u8 = null, // Player 1 or 2 who scored, or null if no one scored yet
+io: std.Io,
 
 pub const Config = struct {
     position: [2]f32 = .{ 0.0, 0.0 }, // Start at center
@@ -61,11 +62,11 @@ fn generateRandomVelocity(random: std.Random) [2]f32 {
     };
 }
 
-pub fn create(allocator: std.mem.Allocator, config: Config) !*Ball {
+pub fn create(allocator: std.mem.Allocator, io: std.Io, config: Config) !*Ball {
     const ball = try allocator.create(Ball);
     var prng = std.Random.DefaultPrng.init(blk: {
         var seed: u64 = undefined;
-        try std.posix.getrandom(std.mem.asBytes(&seed));
+        std.Io.random(io, std.mem.asBytes(&seed));
         break :blk seed;
     });
     const random = prng.random();
@@ -89,6 +90,7 @@ pub fn create(allocator: std.mem.Allocator, config: Config) !*Ball {
         .speed = 5.0,
         .is_visible = true,
         .screen_height = 600.0,
+        .io = io,
     };
     return ball;
 }
@@ -96,7 +98,7 @@ pub fn create(allocator: std.mem.Allocator, config: Config) !*Ball {
 pub fn reset(self: *Ball) !void {
     var prng = std.Random.DefaultPrng.init(blk: {
         var seed: u64 = undefined;
-        try std.posix.getrandom(std.mem.asBytes(&seed));
+        std.Io.random(self.io, std.mem.asBytes(&seed));
         break :blk seed;
     });
     const random = prng.random();

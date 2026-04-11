@@ -1,4 +1,5 @@
 const std = @import("std");
+const zgpu_build = @import("zgpu");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -9,6 +10,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    zonk_mod.link_libc = true;
 
     // zglfw
     const zglfw = b.dependency("zglfw", .{});
@@ -16,7 +18,8 @@ pub fn build(b: *std.Build) void {
 
     // zgpu
     const zgpu = b.dependency("zgpu", .{ .webgpu_backend = .wgpu });
-    zonk_mod.addImport("zgpu", zgpu.module("root"));
+    const zgpu_mod = zgpu.module("root");
+    zonk_mod.addImport("zgpu", zgpu_mod);
 
     // zmath
     {
@@ -30,15 +33,9 @@ pub fn build(b: *std.Build) void {
         zonk_mod.addImport("obj", obj_mod.module("obj"));
     }
 
-    // zpix
-    const zpix = b.dependency("zpix", .{});
-    {
-        zonk_mod.addImport("jpeg", zpix.module("jpeg"));
-        zonk_mod.addImport("png", zpix.module("png"));
-        const image_mod = zpix.module("image");
-        zonk_mod.addImport("image", image_mod);
-        zonk_mod.addImport("color", zpix.module("color"));
-    }
+    // zigimg
+    const zigimg = b.dependency("zigimg", .{}).module("zigimg");
+    zonk_mod.addImport("zigimg", zigimg);
 
     // harfbuzz
     {
@@ -70,17 +67,23 @@ pub fn build(b: *std.Build) void {
 
     const zoto_dep = b.dependency("zoto", .{});
     const zoto_mod = zoto_dep.module("zoto");
-    const zigaudio_dep = b.dependency("zigaudio", .{});
-    const zigaudio_mod = zigaudio_dep.module("zigaudio");
+    const zigaudio_mod = b.dependency("zigaudio", .{}).module("zigaudio");
+    // const zstroke_dep = b.dependency("zstroke", .{
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+    // const zstroke_mod = zstroke_dep.module("zstroke");
 
     const macos_dep = b.dependency("macos", .{});
     zoto_mod.linkLibrary(macos_dep.artifact("macos"));
 
-    buildPong(b, target, optimize, zonk_mod, zpix);
-    buildAnimation(b, target, optimize, zonk_mod, zpix);
-    buildSine(b, target, optimize, zoto_mod);
+    buildAnimation(b, target, optimize, zonk_mod, zigimg);
+    buildPong(b, target, optimize, zonk_mod, zigimg);
+    // buildStroke(b, target, optimize, zonk_mod, zgpu_mod, zstroke_mod);
+    // buildSine(b, target, optimize, zoto_mod);
     buildQoaplay(b, target, optimize, zoto_mod, zigaudio_mod);
-    // buildBlur(b, target, optimize, zonk_mod);
+    // buildTests(b, zonk_mod);
+    buildBlur(b, target, optimize, zonk_mod);
 }
 
 fn buildPong(
@@ -88,12 +91,8 @@ fn buildPong(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     zonk_mod: *std.Build.Module,
-    zpix: *std.Build.Dependency,
+    zigimg: *std.Build.Module,
 ) void {
-    const image_mod = zpix.module("image");
-    const color_mod = zpix.module("color");
-    const zpix_mod = zpix.module("zpix");
-
     const pong_mod = b.createModule(.{
         .root_source_file = b.path("examples/pong/main.zig"),
         .target = target,
@@ -109,9 +108,7 @@ fn buildPong(
     run_pong_step.dependOn(&run_pong.step);
 
     pong_mod.addImport("zonk", zonk_mod);
-    pong_mod.addImport("image", image_mod);
-    pong_mod.addImport("color", color_mod);
-    pong_mod.addImport("zpix", zpix_mod);
+    pong_mod.addImport("zigimg", zigimg);
 }
 
 fn buildAnimation(
@@ -119,17 +116,15 @@ fn buildAnimation(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     zonk_mod: *std.Build.Module,
-    zpix: *std.Build.Dependency,
+    zigimg: *std.Build.Module,
 ) void {
-    const zpix_mod = zpix.module("zpix");
-
     const animation_mod = b.createModule(.{
         .root_source_file = b.path("examples/animation/main.zig"),
         .target = target,
         .optimize = optimize,
     });
     animation_mod.addImport("zonk", zonk_mod);
-    animation_mod.addImport("zpix", zpix_mod);
+    animation_mod.addImport("zigimg", zigimg);
 
     const animation_exe = b.addExecutable(.{
         .root_module = animation_mod,
@@ -187,6 +182,53 @@ fn buildQoaplay(
     const run_qoaplay = b.addRunArtifact(qoaplay_exe);
     const run_qoaplay_step = b.step("qoaplay", "Run the qoaplay example");
     run_qoaplay_step.dependOn(&run_qoaplay.step);
+}
+
+fn buildStroke(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    zonk_mod: *std.Build.Module,
+    zgpu_mod: *std.Build.Module,
+    zstroke_mod: *std.Build.Module,
+) void {
+    const stroke_mod = b.createModule(.{
+        .root_source_file = b.path("examples/stroke/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    stroke_mod.addImport("zonk", zonk_mod);
+    stroke_mod.addImport("zgpu", zgpu_mod);
+    stroke_mod.addImport("zstroke", zstroke_mod);
+
+    const stroke_exe = b.addExecutable(.{
+        .root_module = stroke_mod,
+        .name = "stroke",
+    });
+    b.installArtifact(stroke_exe);
+
+    const run_stroke = b.addRunArtifact(stroke_exe);
+    const run_stroke_step = b.step("stroke", "Run the stroke example");
+    run_stroke_step.dependOn(&run_stroke.step);
+}
+
+fn buildTests(b: *std.Build, zonk_mod: *std.Build.Module) void {
+    const zonk_tests = b.addTest(.{
+        .root_module = zonk_mod,
+    });
+    const stroke_tests_mod = b.createModule(.{
+        .root_source_file = b.path("examples/stroke/StrokeDemo.zig"),
+    });
+    stroke_tests_mod.addImport("zonk", zonk_mod);
+    stroke_tests_mod.addImport("zgpu", b.dependency("zgpu", .{ .webgpu_backend = .wgpu }).module("root"));
+    stroke_tests_mod.addImport("zstroke", b.dependency("zstroke", .{}).module("zstroke"));
+    const stroke_tests = b.addTest(.{
+        .root_module = stroke_tests_mod,
+    });
+
+    const test_step = b.step("test", "Build zonk tests");
+    test_step.dependOn(&zonk_tests.step);
+    test_step.dependOn(&stroke_tests.step);
 }
 
 fn buildBlur(

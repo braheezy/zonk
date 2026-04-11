@@ -1,5 +1,6 @@
 const std = @import("std");
 const zonk = @import("zonk");
+const assert = std.debug.assert;
 const Image = zonk.Image;
 const color = zonk.color;
 
@@ -17,11 +18,13 @@ pub const AnimationGame = @This();
 count: i32 = 0,
 runner_image: ?*Image = null,
 allocator: std.mem.Allocator,
+io: std.Io,
 
-pub fn init(allocator: std.mem.Allocator) !AnimationGame {
+pub fn init(allocator: std.mem.Allocator, io: std.Io) !AnimationGame {
     const game = AnimationGame{
         .allocator = allocator,
-        .runner_image = try Image.fromFile(allocator, "examples/animation/runner.png"),
+        .io = io,
+        .runner_image = try Image.fromFile(allocator, io, "examples/animation/runner.png"),
     };
 
     return game;
@@ -70,11 +73,15 @@ pub fn draw(self: *AnimationGame, screen: *Image) void {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    defer assert(debug_allocator.deinit() == .ok);
+    const gpa = debug_allocator.allocator();
 
-    var game = try AnimationGame.init(allocator);
+    var threaded: std.Io.Threaded = .init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var game = try AnimationGame.init(gpa, io);
     defer game.deinit();
 
     const config = zonk.GameConfig{
@@ -85,5 +92,5 @@ pub fn main() !void {
         .uncapped_fps = false,
     };
 
-    try zonk.run(AnimationGame, &game, allocator, config);
+    try zonk.run(AnimationGame, &game, gpa, io, config);
 }

@@ -1,8 +1,7 @@
 const std = @import("std");
 const zgpu = @import("zgpu");
-const RGBAImage = @import("image").RGBAImage;
-const Rectangle = @import("image").Rectangle;
-const Image = @import("Image.zig").Image;
+const RGBAImage = @import("ImagePrimitives.zig").RGBAImage;
+const Image = @import("Image.zig");
 
 const App = @import("App.zig");
 const ResourceManager = @import("ResourceManager.zig");
@@ -37,6 +36,7 @@ pub const DrawOptions = struct {
 pub fn init(
     gfx: *zgpu.GraphicsContext,
     allocator: std.mem.Allocator,
+    io: std.Io,
     width: u32,
     height: u32,
 ) !*Graphics {
@@ -159,7 +159,7 @@ pub fn init(
 
     // Create render pipeline
     const screen_shader_module = try ResourceManager.loadShaderModule(
-        allocator,
+        io,
         "src/shaders/2d.wgsl",
         gfx.device,
     );
@@ -245,8 +245,8 @@ pub fn deinit(self: *Graphics) void {
         self.allocator.destroy(printer.font_library);
         printer.deinit();
     }
-    self.allocator.free(self.screen.pixels);
     self.screen_image.deinit();
+    self.allocator.free(self.screen.pixels);
     self.allocator.free(self.padded_buffer);
     self.gfx.releaseResource(self.screen_texture);
     self.gfx.releaseResource(self.screen_texture_view);
@@ -258,9 +258,9 @@ pub fn deinit(self: *Graphics) void {
     self.allocator.destroy(self);
 }
 
-pub fn enableTextRendering(self: *Graphics, dpr: u32) !void {
+pub fn enableTextRendering(self: *Graphics, io: std.Io, dpr: u32) !void {
     const font_library = try self.allocator.create(font.Library);
-    font_library.* = try font.Library.init(self.allocator, self.gfx, dpr);
+    font_library.* = try font.Library.init(self.allocator, io, self.gfx, dpr);
 
     try font_library.*.finalizeAtlas();
 
