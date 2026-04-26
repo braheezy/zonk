@@ -1,26 +1,10 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const zoto = @import("zoto");
-
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 const freq_c = 523.3;
 
-pub fn main() !void {
-    const allocator, const is_debug = gpa: {
-        if (builtin.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
-        break :gpa switch (builtin.mode) {
-            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
-            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
-        };
-    };
-    defer {
-        if (is_debug) {
-            if (debug_allocator.deinit() == .leak) {
-                std.process.exit(1);
-            }
-        }
-    }
+pub fn main(process_init: std.process.Init) !void {
+    const allocator = process_init.gpa;
 
     std.debug.print("Testing audio pause and resume functionality...\n", .{});
     std.debug.print("Playing 523.3 Hz sine wave with pause/resume demo...\n", .{});

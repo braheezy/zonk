@@ -1,55 +1,50 @@
 .{
     .name = .zonk,
-
     .version = "0.0.0",
-
     .fingerprint = 0x4753ed006f2ca216,
-
-    .minimum_zig_version = "0.16.0-dev.3028+a85495ca2",
+    .minimum_zig_version = "0.16.0",
 
     .dependencies = .{
         // To handle windowing and input
         .zglfw = .{
-            .path = "../zglfw",
-            // .url = "git+https://github.com/zig-gamedev/zglfw#0dd29d8073487c9fe1e45e6b729b3aac271d5a71",
-            // .hash = "zglfw-0.10.0-dev-zgVDNIG4IQBWN_sfMD-xfC9bJS2hbBN2W7jNlDLovcdC",
+            .url = "git+https://github.com/zig-gamedev/zglfw#51003c105d23db378bb59ce415a387b22f1b0892",
+            .hash = "zglfw-0.10.0-dev-zgVDNIy4IQDJNRy4jrP1As-SZxfJpuWhU1iJ-wBab_VD",
         },
         // Main WebGPU library
         .zgpu = .{
-            .path = "../zgpu",
-            // .url = "git+https://github.com/braheezy/zgpu#aa8111282ec81b9ac9cc501f9d1210f0dcfbab51",
-            // .hash = "zgpu-0.14.0-nqFT5GsZFQAM_eIOImIge0tm4AIaR0np3KHp5FNZBumU",
+            .url = "git+https://github.com/braheezy/zgpu#9d71285e1f9b86834aa2ad5051bd08350a53ecfa",
+            .hash = "zgpu-0.15.0-nqFT5MUaFQDt9wJqw_QcuNBMp9IvJDpgi52BWFWGu02S",
         },
         // Math library
         .zmath = .{
-            .url = "git+https://github.com/zig-gamedev/zmath#3a5955b2b72cd081563fbb084eff05bffd1e3fbb",
-            .hash = "zmath-0.11.0-dev-wjwivdMsAwD-xaLj76YHUq3t9JDH-X16xuMTmnDzqbu2",
+            .url = "git+https://github.com/zig-gamedev/zmath#9f7beb0753bd5cf885285dda8b00361c87c5b6b3",
+            .hash = "zmath-0.11.0-dev-wjwivTktAwA6BEsaW_p-6BFNCYSKMRFONlj6Fxkmuz9d",
         },
         // OBJ loader
         .obj = .{
-            .url = "git+https://github.com/chip2n/zig-obj#47410383c81d24454e370ffadc0980af7abea522",
-            .hash = "obj-3.0.2-v8OfitvLAADxUf6oMHCiWxjJILklY-IMKXlwX-Pv8rKu",
-        },
-        // image decoder
-        .zigimg = .{
-            .path = "../zigimg",
+            .url = "git+https://github.com/chip2n/zig-obj#6070356009e761a4aef82256f1f431037ae97426",
+            .hash = "obj-3.0.2-v8OfivnLAAAgz1LaweX7sbe5ffod4VglAnYFCyjcPr1m",
         },
         // From ghostty
         .harfbuzz = .{ .path = "pkg/harfbuzz" },
         .freetype = .{ .path = "pkg/freetype" },
         .macos = .{ .path = "pkg/macos" },
-        .zoto = .{
-            .path = "../zoto",
-            // .url = "git+https://github.com/braheezy/zoto#58aa6443c072a92318e4b04eeee053eebe761f74",
-            // .hash = "zoto-0.1.0-Eh0DjNOsAQCcXq1r9R4XeM1RKUzUocgmQxLn3F359rCG",
-        },
-        .zigaudio = .{
-            .path = "../zigaudio",
-            // .url = "git+https://github.com/braheezy/zigaudio#0c074dce91ae0e5c7017e55b1a62f832444d5388",
-            // .hash = "zigaudio-0.1.0-hDNruLLfHgB4QjIyJGzRqL2KLg23tI8WRwix_K1k8fwD",
-        },
         .zstroke = .{
             .path = "../zstroke",
+        },
+        // image decoder
+
+        .zigimg = .{
+            .url = "git+https://github.com/zigimg/zigimg#c7e81a13bff1cf4c5b7f085a8360f9d551143d40",
+            .hash = "zigimg-0.1.0-8_eo2uScFwCnpzB1Y2n_jf3euDfMEeCLxJE_E5_W5BNe",
+        },
+        .zoto = .{
+            .url = "git+https://github.com/braheezy/zoto#44e8e51b778f94059fe4196865943e3924c70d75",
+            .hash = "zoto-0.1.0-Eh0DjAK0AQDdTAEp-ViiRZbasKqrv6kQq04eB-cUSyEF",
+        },
+        .zigaudio = .{
+            .url = "git+https://github.com/braheezy/zigaudio#5f56615349f00d72e02acc3318e914d6f44d5f6a",
+            .hash = "zigaudio-0.1.0-hDNruAHnHgAGpyfa-PR1o6CsozV55dQ7vHtgQUNv1O69",
         },
     },
 

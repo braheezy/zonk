@@ -1,17 +1,10 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const zonk = @import("zonk");
 const PongGame = @import("PongGame.zig");
 
-pub fn main() !void {
-    // Memory allocation setup
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer assert(debug_allocator.deinit() == .ok);
-    const gpa = debug_allocator.allocator();
-
-    var threaded: std.Io.Threaded = .init(gpa, .{});
-    defer threaded.deinit();
-    const io = threaded.io();
+pub fn main(process_init: std.process.Init) !void {
+    const gpa = process_init.gpa;
+    const io = process_init.io;
 
     // Create game instance
     var game = try PongGame.init(gpa, io);

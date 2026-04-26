@@ -1,6 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
-const builtin = @import("builtin");
 const zigaudio = @import("zigaudio");
 const zoto = @import("zoto");
 
@@ -8,14 +6,9 @@ fn calcSongLength(frame_count: usize, sample_rate: u32) i128 {
     return @as(i128, @intCast((@as(u128, frame_count) * std.time.ns_per_s) / sample_rate));
 }
 
-pub fn main() !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer assert(debug_allocator.deinit() == .ok);
-    const gpa = debug_allocator.allocator();
-
-    var threaded: std.Io.Threaded = .init(gpa, .{});
-    defer threaded.deinit();
-    const io = threaded.io();
+pub fn main(process_init: std.process.Init) !void {
+    const gpa = process_init.gpa;
+    const io = process_init.io;
 
     const data = @embedFile("island_zone.qoa");
     const decoder = try zigaudio.fromMemory(gpa, data);
