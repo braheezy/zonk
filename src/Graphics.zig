@@ -1,14 +1,32 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zgpu = @import("zgpu");
+const zonk_options = @import("zonk_options");
 const RGBAImage = @import("ImagePrimitives.zig").RGBAImage;
 const Image = @import("Image.zig");
 
+const emscripten = builtin.target.os.tag == .emscripten;
+const text_rendering_enabled = !emscripten and zonk_options.enable_text_rendering;
 const App = @import("App.zig");
-const ResourceManager = @import("ResourceManager.zig");
-const font = @import("font.zig");
-const Printer = @import("printer.zig").Printer;
+const font = if (text_rendering_enabled) @import("font.zig") else struct {
+    pub const Library = opaque {};
+};
+const Printer = if (text_rendering_enabled) @import("printer.zig").Printer else struct {
+    font_library: *font.Library,
+
+    pub fn init(_: std.mem.Allocator, _: *zgpu.GraphicsContext, _: *font.Library, _: u32) !@This() {
+        return error.UnsupportedTextRendering;
+    }
+
+    pub fn deinit(_: *@This()) void {}
+
+    pub fn draw(_: *@This(), _: zgpu.wgpu.TextureView, _: zgpu.wgpu.CommandEncoder) !void {
+        return error.UnsupportedTextRendering;
+    }
+};
 
 pub const Graphics = @This();
+const screen_shader_source = @embedFile("shaders/2d.wgsl");
 
 allocator: std.mem.Allocator,
 gfx: *zgpu.GraphicsContext,
@@ -40,7 +58,10 @@ pub fn init(
     width: u32,
     height: u32,
 ) !*Graphics {
+    _ = io;
     const graphics = try allocator.create(Graphics);
+    errdefer allocator.destroy(graphics);
+
     graphics.* = .{
         .allocator = allocator,
         .gfx = gfx,
@@ -63,6 +84,7 @@ pub fn init(
             .max = .{ .x = @as(i32, @intCast(width)), .y = @as(i32, @intCast(height)) },
         },
     );
+    errdefer allocator.free(graphics.screen.pixels);
 
     // Create and initialize the screen image wrapper
     graphics.screen_image = try allocator.create(Image);
@@ -72,10 +94,14 @@ pub fn init(
         .sub_bounds = null,
         .owns_pixels = false,
     };
+    errdefer graphics.screen_image.deinit();
 
     // Create the screen texture
     graphics.screen_texture = gfx.createTexture(.{
-        .usage = .{ .texture_binding = true, .copy_dst = true },
+        .usage = zgpu.wgpu.combineUsage(
+            zgpu.wgpu.TextureUsages.texture_binding,
+            zgpu.wgpu.TextureUsages.copy_dst,
+        ),
         .size = .{
             .width = width,
             .height = height,
@@ -84,6 +110,7 @@ pub fn init(
         .format = .rgba8_unorm,
         .mip_level_count = 1,
     });
+    errdefer gfx.releaseResource(graphics.screen_texture);
 
     // Create texture view
     graphics.screen_texture_view = gfx.createTextureView(graphics.screen_texture, .{
@@ -95,6 +122,7 @@ pub fn init(
         .array_layer_count = 1,
         .aspect = .all,
     });
+    errdefer gfx.releaseResource(graphics.screen_texture_view);
 
     // Create sampler
     const sampler = gfx.createSampler(.{
@@ -105,12 +133,13 @@ pub fn init(
         .address_mode_v = .clamp_to_edge,
         .address_mode_w = .clamp_to_edge,
     });
+    errdefer gfx.releaseResource(sampler);
 
     // Create bind group layout
     const bind_group_layout = gfx.createBindGroupLayout(&.{
         .{
             .binding = 0,
-            .visibility = .{ .fragment = true },
+            .visibility = zgpu.wgpu.ShaderStages.fragment,
             .texture = .{
                 .sample_type = .float,
                 .view_dimension = .tvdim_2d,
@@ -118,10 +147,8 @@ pub fn init(
         },
         .{
             .binding = 1,
-            .visibility = .{ .fragment = true },
-            .sampler = .{
-                .binding_type = .filtering,
-            },
+            .visibility = zgpu.wgpu.ShaderStages.fragment,
+            .sampler = zgpu.wgpu.compat.samplerLayout(.filtering),
         },
     });
     defer gfx.releaseResource(bind_group_layout);
@@ -132,18 +159,26 @@ pub fn init(
 
     // Create vertex and index buffers
     graphics.vertex_buffer = gfx.device.createBuffer(.{
-        .label = "Vertex buffer",
-        .usage = .{ .copy_dst = true, .vertex = true },
+        .label = zgpu.wgpu.compat.bufferLabel("Vertex buffer"),
+        .usage = zgpu.wgpu.combineBufferUsage(
+            zgpu.wgpu.BufferUsages.copy_dst,
+            zgpu.wgpu.BufferUsages.vertex,
+        ),
         .size = 1024 * @sizeOf(Vertex2D),
         .mapped_at_creation = .false,
     });
+    errdefer graphics.vertex_buffer.release();
 
     graphics.index_buffer = gfx.device.createBuffer(.{
-        .label = "Index buffer",
-        .usage = .{ .copy_dst = true, .index = true },
+        .label = zgpu.wgpu.compat.bufferLabel("Index buffer"),
+        .usage = zgpu.wgpu.combineBufferUsage(
+            zgpu.wgpu.BufferUsages.copy_dst,
+            zgpu.wgpu.BufferUsages.index,
+        ),
         .size = 1024 * @sizeOf(u16),
         .mapped_at_creation = .false,
     });
+    errdefer graphics.index_buffer.release();
 
     // Create bind group
     graphics.screen_bind_group = gfx.createBindGroup(bind_group_layout, &.{
@@ -156,13 +191,10 @@ pub fn init(
             .sampler_handle = sampler,
         },
     });
+    errdefer gfx.releaseResource(graphics.screen_bind_group);
 
     // Create render pipeline
-    const screen_shader_module = try ResourceManager.loadShaderModule(
-        io,
-        "src/shaders/2d.wgsl",
-        gfx.device,
-    );
+    const screen_shader_module = zgpu.createWgslShaderModule(gfx.device, screen_shader_source, "zonk 2d");
     defer screen_shader_module.release();
 
     const color_targets = [_]zgpu.wgpu.ColorTargetState{.{
@@ -208,7 +240,7 @@ pub fn init(
     const pipeline_desc = zgpu.wgpu.RenderPipelineDescriptor{
         .vertex = .{
             .module = screen_shader_module,
-            .entry_point = "vs_main",
+            .entry_point = zgpu.wgpu.compat.shaderEntryPoint("vs_main"),
             .buffer_count = 1,
             .buffers = &[_]zgpu.wgpu.VertexBufferLayout{vertex_buffer_layout},
         },
@@ -219,7 +251,7 @@ pub fn init(
         },
         .fragment = &zgpu.wgpu.FragmentState{
             .module = screen_shader_module,
-            .entry_point = "fs_main",
+            .entry_point = zgpu.wgpu.compat.shaderEntryPoint("fs_main"),
             .target_count = color_targets.len,
             .targets = &color_targets,
         },
@@ -228,6 +260,7 @@ pub fn init(
     };
 
     graphics.pipeline = gfx.createRenderPipeline(pipeline_layout, pipeline_desc);
+    errdefer gfx.releaseResource(graphics.pipeline);
 
     // Calculate padded buffer size and allocate it
     const unpadded_bytes_per_row = width * 4;
@@ -235,15 +268,18 @@ pub fn init(
     const padded_bytes_per_row = (unpadded_bytes_per_row + alignment - 1) & ~(alignment - 1);
     const padded_size = padded_bytes_per_row * height;
     graphics.padded_buffer = try allocator.alloc(u8, padded_size);
+    errdefer allocator.free(graphics.padded_buffer);
 
     return graphics;
 }
 
 pub fn deinit(self: *Graphics) void {
-    if (self.printer) |*printer| {
-        printer.font_library.deinit();
-        self.allocator.destroy(printer.font_library);
-        printer.deinit();
+    if (comptime text_rendering_enabled) {
+        if (self.printer) |*printer| {
+            printer.font_library.deinit();
+            self.allocator.destroy(printer.font_library);
+            printer.deinit();
+        }
     }
     self.screen_image.deinit();
     self.allocator.free(self.screen.pixels);
@@ -259,6 +295,8 @@ pub fn deinit(self: *Graphics) void {
 }
 
 pub fn enableTextRendering(self: *Graphics, io: std.Io, dpr: u32) !void {
+    if (comptime !text_rendering_enabled) return error.UnsupportedTextRendering;
+
     const font_library = try self.allocator.create(font.Library);
     font_library.* = try font.Library.init(self.allocator, io, self.gfx, dpr);
 

@@ -2,6 +2,7 @@ const std = @import("std");
 const zglfw = @import("zglfw");
 const zgpu = @import("zgpu");
 const zmath = @import("zmath");
+const zonk_options = @import("zonk_options");
 
 const ResourceManager = @import("ResourceManager.zig");
 pub const Graphics = @import("Graphics.zig");
@@ -44,8 +45,9 @@ width: u32,
 height: u32,
 
 pub fn init(allocator: std.mem.Allocator, io: std.Io, window_config: GameConfig, screen_config: GameConfig) !*App {
-    std.debug.print("App.init - initializing GLFW\n", .{});
+    std.log.debug("App.init - initializing GLFW", .{});
     try zglfw.init();
+    errdefer zglfw.terminate();
 
     // Create window with window_config dimensions
     zglfw.windowHint(.client_api, .no_api);
@@ -64,10 +66,13 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, window_config: GameConfig,
         null,
         null,
     );
-    std.debug.print("App.init - window created\n", .{});
+    errdefer zglfw.destroyWindow(window);
+    std.log.debug("App.init - window created", .{});
 
     // Create app instance with window dimensions
     const app = try allocator.create(App);
+    errdefer allocator.destroy(app);
+
     app.* = .{
         .allocator = allocator,
         .io = io,
@@ -80,8 +85,9 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, window_config: GameConfig,
         .width = window_config.width,
         .height = window_config.height,
     };
+    errdefer app.input.deinit();
 
-    std.debug.print("App.init - creating graphics context\n", .{});
+    std.log.debug("App.init - creating graphics context", .{});
     // Initialize graphics context
     const gfx = try zgpu.GraphicsContext.create(allocator, .{
         .window = window,
@@ -100,7 +106,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, window_config: GameConfig,
             .limits = .{
                 .max_vertex_attributes = 3,
                 .max_vertex_buffers = 1,
-                .max_buffer_size = @max(4 * 1024 * 1024, 100000 * @sizeOf(Graphics.Vertex2D)),
+                .max_buffer_size = @max(zonk_options.max_buffer_size, 100000 * @sizeOf(Graphics.Vertex2D)),
                 .max_vertex_buffer_array_stride = @sizeOf(Graphics.Vertex2D),
                 .max_bind_groups = 1,
                 .max_uniform_buffers_per_shader_stage = 1,
@@ -108,6 +114,8 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, window_config: GameConfig,
             },
         },
     });
+    var gfx_needs_destroy = true;
+    errdefer if (gfx_needs_destroy) gfx.destroy(allocator);
 
     // Initialize graphics system with screen_config dimensions (logical screen size)
     app.graphics = try Graphics.init(
@@ -117,20 +125,22 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io, window_config: GameConfig,
         screen_config.width,
         screen_config.height,
     );
+    gfx_needs_destroy = false;
+    errdefer app.graphics.deinit();
 
     if (window_config.enable_text_rendering) {
         try enableTextRendering(app);
     }
 
     app.createCallbacks();
-    std.debug.print("App.init - initialization complete\n", .{});
+    std.log.debug("App.init - initialization complete", .{});
 
     return app;
 }
 
 pub fn enableTextRendering(self: *App) !void {
     const content_scale_xy = self.window.getContentScale();
-    std.debug.print("Pixel scale: (x: {d}, y: {d})\n", .{ content_scale_xy[0], content_scale_xy[1] });
+    std.log.debug("Pixel scale: (x: {d}, y: {d})", .{ content_scale_xy[0], content_scale_xy[1] });
     std.debug.assert(content_scale_xy[0] == content_scale_xy[1]); // Require square pixels.
     const dpr: u32 = @intFromFloat(@round(content_scale_xy[0])); // Round to full pixels.
 

@@ -1,5 +1,6 @@
 const std = @import("std");
 pub const zglfw = @import("zglfw");
+pub const zgpu = @import("zgpu");
 
 const zigimg = @import("zigimg");
 pub const image = @import("ImagePrimitives.zig");

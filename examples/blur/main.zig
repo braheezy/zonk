@@ -46,8 +46,8 @@ pub fn main(process_init: std.process.Init) !void {
 
     // Debug: Print image dimensions
     const bounds = test_image.rgba_image.bounds();
-    std.debug.print("Loaded image: {}x{}\n", .{ bounds.dX(), bounds.dY() });
-    std.debug.print("Screen size: {}x{}\n", .{ screen_width, screen_height });
+    std.log.debug("Loaded image: {}x{}", .{ bounds.dX(), bounds.dY() });
+    std.log.debug("Screen size: {}x{}", .{ screen_width, screen_height });
 
     defer test_image.deinit(); // Clean up the image
 

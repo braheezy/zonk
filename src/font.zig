@@ -130,7 +130,10 @@ pub const Library = struct {
         defer self.allocator.free(font_atlas.bitmap);
 
         const atlas_texture = self.gctx.createTexture(.{
-            .usage = .{ .texture_binding = true, .copy_dst = true },
+            .usage = zgpu.wgpu.combineUsage(
+                zgpu.wgpu.TextureUsages.texture_binding,
+                zgpu.wgpu.TextureUsages.copy_dst,
+            ),
             .size = .{
                 .width = font_atlas.size,
                 .height = font_atlas.size,

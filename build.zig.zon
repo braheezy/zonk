@@ -7,18 +7,18 @@
     .dependencies = .{
         // To handle windowing and input
         .zglfw = .{
-            .url = "git+https://github.com/zig-gamedev/zglfw#51003c105d23db378bb59ce415a387b22f1b0892",
-            .hash = "zglfw-0.10.0-dev-zgVDNIy4IQDJNRy4jrP1As-SZxfJpuWhU1iJ-wBab_VD",
+            .url = "git+https://github.com/braheezy/zglfw#14d915531dc489d7856b3d090b1c005ae625980c",
+            .hash = "zglfw-0.11.0-zgVDNMa8IQDeHyHYK4VgshNdMBxs-XNvf-X46csjMvPS",
         },
         // Main WebGPU library
         .zgpu = .{
-            .url = "git+https://github.com/braheezy/zgpu#9d71285e1f9b86834aa2ad5051bd08350a53ecfa",
-            .hash = "zgpu-0.15.0-nqFT5MUaFQDt9wJqw_QcuNBMp9IvJDpgi52BWFWGu02S",
+            .url = "git+https://github.com/braheezy/zgpu#c6aece8bc8643d0f3c43e688159b5580ce5d681d",
+            .hash = "zgpu-0.16.0-nqFT5MF0GQCeYsoX-qhu3G7MWKZLgRgeH2q-b5AVCSv-",
         },
         // Math library
         .zmath = .{
-            .url = "git+https://github.com/zig-gamedev/zmath#9f7beb0753bd5cf885285dda8b00361c87c5b6b3",
-            .hash = "zmath-0.11.0-dev-wjwivTktAwA6BEsaW_p-6BFNCYSKMRFONlj6Fxkmuz9d",
+            .url = "git+https://github.com/braheezy/zmath#d5fa55fc7d2db3a1ab4dcea1434a0423e7ad5779",
+            .hash = "zmath-0.12.0-wjwivfMtAwBEt0kCv7kh538uzhr02QUPU8Ds5RgU635A",
         },
         // OBJ loader
         .obj = .{
@@ -29,22 +29,30 @@
         .harfbuzz = .{ .path = "pkg/harfbuzz" },
         .freetype = .{ .path = "pkg/freetype" },
         .macos = .{ .path = "pkg/macos" },
-        .zstroke = .{
-            .path = "../zstroke",
-        },
         // image decoder
-
         .zigimg = .{
-            .url = "git+https://github.com/zigimg/zigimg#c7e81a13bff1cf4c5b7f085a8360f9d551143d40",
-            .hash = "zigimg-0.1.0-8_eo2uScFwCnpzB1Y2n_jf3euDfMEeCLxJE_E5_W5BNe",
+            .url = "git+https://github.com/zigimg/zigimg#734fa919fb15b7917d4eb124f53600348f4ffa30",
+            .hash = "zigimg-0.1.0-8_eo2sBLGACBebrhQZUwRliZNSUyDn6szp99eip_6-Rw",
         },
+        // Play audio
         .zoto = .{
-            .url = "git+https://github.com/braheezy/zoto#44e8e51b778f94059fe4196865943e3924c70d75",
-            .hash = "zoto-0.1.0-Eh0DjAK0AQDdTAEp-ViiRZbasKqrv6kQq04eB-cUSyEF",
+            .url = "git+https://github.com/braheezy/zoto#84f43bed1a657f48433152a7c1da0408d5533d56",
+            .hash = "zoto-0.1.0-Eh0DjJruAQCYJar_IoE_BEtVP-qxC8vFEb20HDAQcZM8",
         },
+        // Decode audio
         .zigaudio = .{
-            .url = "git+https://github.com/braheezy/zigaudio#5f56615349f00d72e02acc3318e914d6f44d5f6a",
-            .hash = "zigaudio-0.1.0-hDNruAHnHgAGpyfa-PR1o6CsozV55dQ7vHtgQUNv1O69",
+            .url = "git+https://github.com/braheezy/zigaudio#75b9c01d1c095fa70bec93e61fa86d923ef7df57",
+            .hash = "zigaudio-0.2.0-hDNruGoJHwD4kMrBPwTdwbUi-b1m89vTAm0rGFCvLflc",
+        },
+        // Compile for web
+        .zemscripten = .{
+            .url = "git+https://github.com/Yinameah/zemscripten?ref=0.17#06d49243789d638ba10d4af004c46df4da83579c",
+            .hash = "zemscripten-0.2.0-dev-sRlDqKFRAAAXl8aICu541O6PiY70v4HIr3FTmCg--WqM",
+        },
+        // Get the thing that compiles for web
+        .emsdk = .{
+            .url = "https://github.com/emscripten-core/emsdk/archive/refs/tags/4.0.19.tar.gz",
+            .hash = "N-V-__8AAKfxDwDU7m8uFOZoPBdOUdDoPOqGCMtj-GZUAmh6",
         },
     },
 

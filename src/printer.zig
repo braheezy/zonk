@@ -67,8 +67,8 @@ pub const Printer = struct {
 
     pub fn init(allocator: Allocator, gctx: *zgpu.GraphicsContext, font_library: *Library, dpr: u32) !Printer {
         const bind_group_layout = gctx.createBindGroupLayout(&.{
-            zgpu.textureEntry(0, .{ .fragment = true }, .float, .tvdim_2d, false),
-            zgpu.samplerEntry(1, .{ .fragment = true }, .filtering),
+            zgpu.textureEntry(0, wgpu.ShaderStages.fragment, .float, .tvdim_2d, false),
+            zgpu.samplerEntry(1, wgpu.ShaderStages.fragment, .filtering),
         });
         defer gctx.releaseResource(bind_group_layout);
 
@@ -111,7 +111,7 @@ pub const Printer = struct {
         const pipeline_descriptor = wgpu.RenderPipelineDescriptor{
             .vertex = wgpu.VertexState{
                 .module = vs_module,
-                .entry_point = "main",
+                .entry_point = wgpu.compat.shaderEntryPoint("main"),
                 .buffer_count = vertex_buffers.len,
                 .buffers = &vertex_buffers,
             },
@@ -122,11 +122,11 @@ pub const Printer = struct {
             },
             .depth_stencil = &wgpu.DepthStencilState{
                 .format = .depth32_float,
-                .depth_write_enabled = false,
+                .depth_write_enabled = wgpu.compat.optionalBool(false),
             },
             .fragment = &wgpu.FragmentState{
                 .module = fs_module,
-                .entry_point = "main",
+                .entry_point = wgpu.compat.shaderEntryPoint("main"),
                 .target_count = color_targets.len,
                 .targets = &color_targets,
             },
@@ -182,8 +182,8 @@ pub const Printer = struct {
         encoder: zgpu.wgpu.CommandEncoder,
     ) !void {
         const atlas_size: f32 = @floatFromInt(self.font_library.atlas_size);
-        const screen_width: f32 = @floatFromInt(self.gctx.swapchain_descriptor.width);
-        const screen_height: f32 = @floatFromInt(self.gctx.swapchain_descriptor.height);
+        const screen_width: f32 = @floatFromInt(self.gctx.width);
+        const screen_height: f32 = @floatFromInt(self.gctx.height);
 
         var glyph_count: u32 = 0;
         for (self.commands.items) |cmd| {
@@ -192,7 +192,10 @@ pub const Printer = struct {
 
         // TODO: store previous buffer and detect if it is still valid and only render if not.
         const vertex_buffer = self.gctx.createBuffer(.{
-            .usage = .{ .copy_dst = true, .vertex = true },
+            .usage = wgpu.combineBufferUsage(
+                wgpu.BufferUsages.copy_dst,
+                wgpu.BufferUsages.vertex,
+            ),
             .size = glyph_count * 2 * 12 * @sizeOf(f32) * 2, // *2 for color
         });
         defer self.gctx.releaseResource(vertex_buffer);
@@ -342,11 +345,11 @@ pub fn createDepthTexture(gctx: *zgpu.GraphicsContext) struct {
     view: zgpu.TextureViewHandle,
 } {
     const texture = gctx.createTexture(.{
-        .usage = .{ .render_attachment = true },
+        .usage = wgpu.TextureUsages.render_attachment,
         .dimension = .tdim_2d,
         .size = .{
-            .width = gctx.swapchain_descriptor.width,
-            .height = gctx.swapchain_descriptor.height,
+            .width = gctx.width,
+            .height = gctx.height,
             .depth_or_array_layers = 1,
         },
         .format = .depth32_float,

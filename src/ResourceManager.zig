@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zgpu = @import("zgpu");
 const obj = @import("obj");
 const zmath = @import("zmath");
@@ -7,6 +8,7 @@ const image_mod = @import("ImagePrimitives.zig");
 const Image = @import("Image.zig");
 
 const ResourceManager = @This();
+const emscripten = builtin.target.os.tag == .emscripten;
 
 pub const VertexAttr = struct {
     position: [3]f32,
@@ -193,7 +195,10 @@ pub fn loadTexture(
             .height = height,
             .depth_or_array_layers = 1,
         },
-        .usage = .{ .texture_binding = true, .copy_dst = true },
+        .usage = zgpu.wgpu.combineUsage(
+            zgpu.wgpu.TextureUsages.texture_binding,
+            zgpu.wgpu.TextureUsages.copy_dst,
+        ),
         .view_format_count = 0,
         .view_formats = null,
     };
@@ -460,8 +465,27 @@ pub fn loadImage(
     io: std.Io,
     path: []const u8,
 ) !*Image {
-    var read_buffer: [8 * 1024]u8 = undefined;
-    var loaded_image = try zigimg.Image.fromFilePath(allocator, io, path, &read_buffer);
+    var loaded_image = if (emscripten) loaded_image: {
+        const fd = try std.posix.openat(std.posix.AT.FDCWD, path, .{
+            .ACCMODE = .RDONLY,
+        }, 0);
+        defer closeFd(fd);
+
+        var data: std.ArrayList(u8) = .empty;
+        defer data.deinit(allocator);
+
+        var read_buffer: [8 * 1024]u8 = undefined;
+        while (true) {
+            const len = try std.posix.read(fd, &read_buffer);
+            if (len == 0) break;
+            try data.appendSlice(allocator, read_buffer[0..len]);
+        }
+
+        break :loaded_image try zigimg.Image.fromMemory(allocator, data.items);
+    } else loaded_image: {
+        var read_buffer: [8 * 1024]u8 = undefined;
+        break :loaded_image try zigimg.Image.fromFilePath(allocator, io, path, &read_buffer);
+    };
     defer loaded_image.deinit(allocator);
 
     // Convert to RGBA format regardless of source format
@@ -474,6 +498,10 @@ pub fn loadImage(
     };
 
     return img;
+}
+
+fn closeFd(fd: std.posix.fd_t) void {
+    _ = std.posix.system.close(fd);
 }
 
 /// Convert any image format to RGBA
